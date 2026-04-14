@@ -6,7 +6,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
@@ -26,6 +26,9 @@ from vllm.v1.utils import ConstantList
 if TYPE_CHECKING:
     from vllm.lora.request import LoRARequest
     from vllm.v1.core.kv_cache_utils import BlockHash
+
+
+KVSizeClass = Literal["small", "large", "default"]
 
 
 @dataclass
@@ -175,6 +178,10 @@ class Request:
         self.resumable = resumable
         # None entry in the queue means finished.
         self.streaming_queue: deque[StreamingUpdate | None] | None = None
+
+        # Experimental dual-size KV allocation metadata.
+        self.kv_size_class: KVSizeClass = "default"
+        self.kv_block_size: int | None = None
 
     @classmethod
     def from_engine_core_request(

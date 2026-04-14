@@ -5,6 +5,7 @@ import queue
 import signal
 import threading
 import time
+from copy import deepcopy
 from collections import defaultdict, deque
 from collections.abc import Callable, Generator
 from concurrent.futures import Future
@@ -255,7 +256,7 @@ class EngineCore:
         # Track max_model_len before KV cache config to detect auto-fit changes
         max_model_len_before = vllm_config.model_config.max_model_len
 
-        kv_cache_configs = get_kv_cache_configs(
+        kv_cache_configs = self._get_engine_kv_cache_configs(
             vllm_config, kv_cache_specs, available_gpu_memory
         )
 
@@ -267,8 +268,19 @@ class EngineCore:
             self.collective_rpc("update_max_model_len", args=(max_model_len_after,))
 
         scheduler_kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
-        vllm_config.cache_config.num_gpu_blocks = scheduler_kv_cache_config.num_blocks
-        kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
+        if vllm_config.cache_config.experimental_dual_kv_blocks:
+            assert scheduler_kv_cache_config.aux_kv_cache_configs is not None
+            all_scheduler_configs = [
+                scheduler_kv_cache_config,
+                *scheduler_kv_cache_config.aux_kv_cache_configs.values(),
+            ]
+            vllm_config.cache_config.num_gpu_blocks = sum(
+                cfg.num_blocks for cfg in all_scheduler_configs
+            )
+            kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
+        else:
+            vllm_config.cache_config.num_gpu_blocks = scheduler_kv_cache_config.num_blocks
+            kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
         if kv_cache_groups:
             vllm_config.cache_config.block_size = min(
                 g.kv_cache_spec.block_size for g in kv_cache_groups
@@ -286,6 +298,79 @@ class EngineCore:
             scope="local",
         )
         return scheduler_kv_cache_config
+
+    def _get_engine_kv_cache_configs(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_specs: list[dict[str, Any]],
+        available_gpu_memory: list[int],
+    ) -> list[KVCacheConfig]:
+        cache_config = vllm_config.cache_config
+        if not cache_config.experimental_dual_kv_blocks:
+            return get_kv_cache_configs(vllm_config, kv_cache_specs, available_gpu_memory)
+
+        return self._get_dual_kv_cache_configs(
+            vllm_config,
+            kv_cache_specs,
+            available_gpu_memory,
+        )
+
+    def _get_dual_kv_cache_configs(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_specs: list[dict[str, Any]],
+        available_gpu_memory: list[int],
+    ) -> list[KVCacheConfig]:
+        cache_config = vllm_config.cache_config
+        assert cache_config.experimental_dual_kv_blocks
+
+        if any(len(spec) == 0 for spec in kv_cache_specs):
+            raise ValueError(
+                "experimental_dual_kv_blocks requires models with KV cache"
+            )
+
+        small_size = cache_config.experimental_small_kv_block_size
+        large_size = cache_config.experimental_large_kv_block_size
+        pool_fraction = cache_config.experimental_small_kv_pool_fraction
+
+        small_specs = self._copy_kv_cache_specs_with_block_size(kv_cache_specs, small_size)
+        large_specs = self._copy_kv_cache_specs_with_block_size(kv_cache_specs, large_size)
+
+        small_memory = [max(1, int(mem * pool_fraction)) for mem in available_gpu_memory]
+        large_memory = [
+            max(1, mem - small_mem)
+            for mem, small_mem in zip(available_gpu_memory, small_memory)
+        ]
+
+        small_configs = get_kv_cache_configs(vllm_config, small_specs, small_memory)
+        large_configs = get_kv_cache_configs(vllm_config, large_specs, large_memory)
+
+        combined_configs: list[KVCacheConfig] = []
+        for small_cfg, large_cfg in zip(small_configs, large_configs):
+            if len(small_cfg.kv_cache_groups) != 1 or len(large_cfg.kv_cache_groups) != 1:
+                raise ValueError(
+                    "experimental_dual_kv_blocks currently supports exactly one "
+                    "KV cache group per worker"
+                )
+            small_cfg.kv_size_class = "small"
+            large_cfg.kv_size_class = "large"
+            small_cfg.aux_kv_cache_configs = {"large": large_cfg}
+            combined_configs.append(small_cfg)
+
+        return combined_configs
+
+    def _copy_kv_cache_specs_with_block_size(
+        self,
+        kv_cache_specs: list[dict[str, Any]],
+        block_size: int,
+    ) -> list[dict[str, Any]]:
+        copied_specs: list[dict[str, Any]] = []
+        for worker_specs in kv_cache_specs:
+            copied_specs.append({
+                layer_name: deepcopy(spec).copy_with_new_block_size(block_size)
+                for layer_name, spec in worker_specs.items()
+            })
+        return copied_specs
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_executor.supported_tasks
@@ -749,6 +834,7 @@ class EngineCore:
             )
 
         req = Request.from_engine_core_request(request, self.request_block_hasher)
+        self._assign_request_kv_size_class(req)
         if req.use_structured_output:
             # Note on thread safety: no race condition.
             # `grammar_init` is only invoked in input processing thread. For
@@ -757,6 +843,21 @@ class EngineCore:
             # compilation status before scheduling request.
             self.structured_output_manager.grammar_init(req)
         return req, request.current_wave
+
+    def _assign_request_kv_size_class(self, request: Request) -> None:
+        cache_config = self.vllm_config.cache_config
+        if not cache_config.experimental_dual_kv_blocks:
+            request.kv_size_class = "default"
+            request.kv_block_size = cache_config.block_size
+            return
+
+        expected_total_tokens = request.num_prompt_tokens + request.max_tokens
+        if expected_total_tokens <= cache_config.experimental_dual_kv_threshold_tokens:
+            request.kv_size_class = "small"
+            request.kv_block_size = cache_config.experimental_small_kv_block_size
+        else:
+            request.kv_size_class = "large"
+            request.kv_block_size = cache_config.experimental_large_kv_block_size
 
     def _eep_scale_up_before_kv_init(self):
         raise NotImplementedError

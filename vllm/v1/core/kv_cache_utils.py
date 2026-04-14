@@ -1281,6 +1281,11 @@ def generate_scheduler_kv_cache_config(
             group.kv_cache_spec = next(
                 iter(group.kv_cache_spec.kv_cache_specs.values())
             )
+    if cfg.aux_kv_cache_configs:
+        cfg.aux_kv_cache_configs = {
+            size_class: generate_scheduler_kv_cache_config([aux_cfg])
+            for size_class, aux_cfg in cfg.aux_kv_cache_configs.items()
+        }
     return cfg
 
 

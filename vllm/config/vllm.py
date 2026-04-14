@@ -1747,6 +1747,46 @@ class VllmConfig:
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_experimental_dual_kv_blocks(self) -> "VllmConfig":
+        cache_config = self.cache_config
+        if not cache_config.experimental_dual_kv_blocks:
+            return self
+
+        if self.model_config is None:
+            return self
+
+        if cache_config.enable_prefix_caching:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support prefix caching"
+            )
+        if self.kv_transfer_config is not None or cache_config.kv_offloading_size is not None:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support KV connectors/offload"
+            )
+        if self.speculative_config is not None:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support speculative decoding"
+            )
+        if self.parallel_config.decode_context_parallel_size > 1:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support DCP"
+            )
+        if self.parallel_config.prefill_context_parallel_size > 1:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support PCP"
+            )
+        if self.model_config.is_encoder_decoder:
+            raise ValueError(
+                "experimental_dual_kv_blocks only supports decoder-only models"
+            )
+        if self.model_config.is_hybrid:
+            raise ValueError(
+                "experimental_dual_kv_blocks does not support hybrid attention models"
+            )
+
+        return self
+
 
 _current_vllm_config: VllmConfig | None = None
 _current_prefix: str | None = None

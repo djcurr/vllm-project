@@ -211,6 +211,18 @@ class ECConnectorOutput:
     finished_sending: set[str] | None = None
     finished_recving: set[str] | None = None
 
+    @classmethod
+    def merge(cls, *outputs: "ECConnectorOutput"):
+        assert len(outputs) > 0, "Cannot merge empty outputs"
+        return cls(
+            finished_sending=_combine_non_none(
+                set.union, [output.finished_sending for output in outputs]
+            ),
+            finished_recving=_combine_non_none(
+                set.union, [output.finished_recving for output in outputs]
+            ),
+        )
+
 
 # ModelRunnerOutput is serialized and sent to the scheduler process.
 # This is expensive for torch.Tensor so prefer to use list instead.
@@ -252,6 +264,121 @@ class ModelRunnerOutput:
 
     # information related to cudagraph execution
     cudagraph_stats: CUDAGraphStat | None = None
+
+
+def _merge_logprobs_lists(
+    outputs_by_req_id: dict[str, tuple[ModelRunnerOutput, int]],
+    req_ids: list[str],
+    sampled_token_ids: list[list[int]],
+) -> LogprobsLists | None:
+    if not any(output.logprobs is not None for output, _ in outputs_by_req_id.values()):
+        return None
+
+    logprob_token_ids_parts: list[np.ndarray] = []
+    logprobs_parts: list[np.ndarray] = []
+    sampled_token_ranks_parts: list[np.ndarray] = []
+    cu_num_generated_tokens: list[int] = []
+    running_total = 0
+
+    for req_id, sampled_ids in zip(req_ids, sampled_token_ids, strict=False):
+        output, req_idx = outputs_by_req_id[req_id]
+        if output.logprobs is None:
+            continue
+        num_positions = len(sampled_ids)
+        sliced = output.logprobs.slice_request(req_idx, num_positions)
+        logprob_token_ids_parts.append(sliced.logprob_token_ids)
+        logprobs_parts.append(sliced.logprobs)
+        sampled_token_ranks_parts.append(sliced.sampled_token_ranks)
+        cu_num_generated_tokens.append(running_total)
+        running_total += num_positions
+
+    if not logprob_token_ids_parts:
+        return None
+
+    return LogprobsLists(
+        logprob_token_ids=np.concatenate(logprob_token_ids_parts, axis=0),
+        logprobs=np.concatenate(logprobs_parts, axis=0),
+        sampled_token_ranks=np.concatenate(sampled_token_ranks_parts, axis=0),
+        cu_num_generated_tokens=cu_num_generated_tokens,
+    )
+
+
+def merge_model_runner_outputs(
+    outputs: list[ModelRunnerOutput],
+    req_id_order: list[str] | None = None,
+) -> ModelRunnerOutput:
+    assert outputs, "Cannot merge empty ModelRunnerOutput list"
+    if len(outputs) == 1:
+        return outputs[0]
+
+    if req_id_order is None:
+        req_id_order = []
+        for output in outputs:
+            req_id_order.extend(output.req_ids)
+
+    outputs_by_req_id: dict[str, tuple[ModelRunnerOutput, int]] = {}
+    for output in outputs:
+        for req_id in output.req_ids:
+            outputs_by_req_id[req_id] = (output, output.req_id_to_index[req_id])
+
+    req_ids = [req_id for req_id in req_id_order if req_id in outputs_by_req_id]
+    req_id_to_index = {req_id: idx for idx, req_id in enumerate(req_ids)}
+    sampled_token_ids = [
+        outputs_by_req_id[req_id][0].sampled_token_ids[outputs_by_req_id[req_id][1]]
+        for req_id in req_ids
+    ]
+
+    pooler_output: list[torch.Tensor | None] | None = None
+    if any(output.pooler_output is not None for output in outputs):
+        pooler_output = [
+            outputs_by_req_id[req_id][0].pooler_output[
+                outputs_by_req_id[req_id][1]
+            ]
+            if outputs_by_req_id[req_id][0].pooler_output is not None
+            else None
+            for req_id in req_ids
+        ]
+
+    kv_connector_outputs = [
+        output.kv_connector_output
+        for output in outputs
+        if output.kv_connector_output is not None
+    ]
+    ec_connector_outputs = [
+        output.ec_connector_output
+        for output in outputs
+        if output.ec_connector_output is not None
+    ]
+
+    merged_num_nans: dict[str, int] = {}
+    for output in outputs:
+        if output.num_nans_in_logits:
+            merged_num_nans.update(output.num_nans_in_logits)
+
+    prompt_logprobs_dict: dict[str, LogprobsTensors | None] = {}
+    for output in outputs:
+        prompt_logprobs_dict.update(output.prompt_logprobs_dict)
+
+    return ModelRunnerOutput(
+        req_ids=req_ids,
+        req_id_to_index=req_id_to_index,
+        sampled_token_ids=sampled_token_ids,
+        logprobs=_merge_logprobs_lists(outputs_by_req_id, req_ids, sampled_token_ids),
+        prompt_logprobs_dict=prompt_logprobs_dict,
+        pooler_output=pooler_output,
+        kv_connector_output=(
+            KVConnectorOutput.merge(*kv_connector_outputs)
+            if kv_connector_outputs
+            else None
+        ),
+        ec_connector_output=(
+            ECConnectorOutput.merge(*ec_connector_outputs)
+            if ec_connector_outputs
+            else None
+        ),
+        num_nans_in_logits=merged_num_nans or None,
+        cudagraph_stats=None,
+    )
 
 
 # ModelRunnerOutput wrapper for async scheduling.

@@ -16,6 +16,7 @@ from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.utils.collection_utils import swap_dict_values
 from vllm.v1.outputs import LogprobsTensors
 from vllm.v1.pool.metadata import PoolingMetadata, PoolingStates
+from vllm.v1.request import KVSizeClass
 from vllm.v1.sample.logits_processor import (
     BatchUpdateBuilder,
     LogitsProcessors,
@@ -45,6 +46,8 @@ class CachedRequestState:
 
     lora_request: LoRARequest | None = None
     prompt_embeds: torch.Tensor | None = None
+    kv_size_class: KVSizeClass = "default"
+    kv_block_size: int | None = None
 
     # Used when both async_scheduling and spec_decode are enabled.
     prev_num_draft_len: int = 0

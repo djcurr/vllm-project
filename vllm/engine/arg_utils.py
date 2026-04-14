@@ -453,6 +453,22 @@ class EngineArgs:
     )
     block_size: int | None = None
     enable_prefix_caching: bool | None = None
+    experimental_dual_kv_blocks: bool = CacheConfig.experimental_dual_kv_blocks
+    experimental_small_kv_block_size: int = (
+        CacheConfig.experimental_small_kv_block_size
+    )
+    experimental_large_kv_block_size: int = (
+        CacheConfig.experimental_large_kv_block_size
+    )
+    experimental_dual_kv_threshold_tokens: int = (
+        CacheConfig.experimental_dual_kv_threshold_tokens
+    )
+    experimental_small_kv_pool_fraction: float = (
+        CacheConfig.experimental_small_kv_pool_fraction
+    )
+    experimental_dual_kv_mixed_kernel: bool = (
+        CacheConfig.experimental_dual_kv_mixed_kernel
+    )
     prefix_caching_hash_algo: PrefixCachingHashAlgo = (
         CacheConfig.prefix_caching_hash_algo
     )
@@ -1582,6 +1598,12 @@ class EngineArgs:
             num_gpu_blocks_override=self.num_gpu_blocks_override,
             sliding_window=sliding_window,
             enable_prefix_caching=self.enable_prefix_caching,
+            experimental_dual_kv_blocks=self.experimental_dual_kv_blocks,
+            experimental_small_kv_block_size=self.experimental_small_kv_block_size,
+            experimental_large_kv_block_size=self.experimental_large_kv_block_size,
+            experimental_dual_kv_threshold_tokens=self.experimental_dual_kv_threshold_tokens,
+            experimental_small_kv_pool_fraction=self.experimental_small_kv_pool_fraction,
+            experimental_dual_kv_mixed_kernel=self.experimental_dual_kv_mixed_kernel,
             prefix_caching_hash_algo=self.prefix_caching_hash_algo,
             calculate_kv_scales=self.calculate_kv_scales,
             kv_cache_dtype_skip_layers=self.kv_cache_dtype_skip_layers,
