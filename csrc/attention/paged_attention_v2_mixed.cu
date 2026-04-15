@@ -29,7 +29,8 @@ void paged_attention_v2_mixed_launcher_impl(
   int max_num_blocks_per_seq = block_tables.size(1);
   int q_stride = query.stride(0);
   int kv_block_stride = key_cache.stride(0);
-  int kv_head_stride = key_cache.stride(1);
+  int kv_token_stride = key_cache.stride(1);
+  int kv_head_stride = key_cache.stride(2);
 
   const float* alibi_slopes_ptr =
       alibi_slopes
@@ -53,9 +54,10 @@ void paged_attention_v2_mixed_launcher_impl(
   int max_num_partitions = DIVIDE_ROUND_UP(max_seq_len, PARTITION_SIZE);
   int logits_size = PARTITION_SIZE * sizeof(float);
   int outputs_size = (NUM_WARPS / 2) * head_size * sizeof(float);
+  int v_smem_size = NUM_WARPS * KERNEL_BLOCK_SIZE * head_size * sizeof(CACHE_T);
 
   dim3 grid(num_heads, num_seqs, max_num_partitions);
-  int shared_mem_size = std::max(logits_size, outputs_size);
+  int shared_mem_size = std::max(logits_size + v_smem_size, outputs_size);
   
   dim3 reduce_grid(num_heads, num_seqs);
   int reduce_shared_mem_size = 2 * max_num_partitions * sizeof(float);
@@ -71,7 +73,8 @@ void paged_attention_v2_mixed_launcher_impl(
           exp_sums_ptr, max_logits_ptr, tmp_out_ptr, query_ptr, key_cache_ptr,
           value_cache_ptr, num_kv_heads, scale, block_tables_ptr, seq_lens_ptr,
           block_size_multipliers_ptr, max_num_blocks_per_seq, alibi_slopes_ptr,
-          q_stride, kv_block_stride, kv_head_stride, k_scale_ptr, v_scale_ptr,
+          q_stride, kv_block_stride, kv_token_stride, kv_head_stride, k_scale_ptr,
+          v_scale_ptr,
           tp_rank, blocksparse_local_blocks, blocksparse_vert_stride,
           blocksparse_block_size, blocksparse_head_sliding_step);
   C10_CUDA_KERNEL_LAUNCH_CHECK();

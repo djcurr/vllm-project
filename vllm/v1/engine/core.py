@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import faulthandler
 import os
 import queue
 import signal
+import sys
 import threading
 import time
 from copy import deepcopy
@@ -110,6 +112,11 @@ class EngineCore:
             )
 
         self.log_stats = log_stats
+        self._hang_timeout_s = envs.VLLM_ENGINECORE_HANG_TIMEOUT
+        self._last_progress_time = time.time()
+        self._hang_watchdog_stop = threading.Event()
+        self._hang_watchdog_triggered = False
+        self._hang_watchdog_thread: threading.Thread | None = None
 
         # Setup Model.
         self.model_executor = executor_class(vllm_config)
@@ -852,7 +859,15 @@ class EngineCore:
             return
 
         expected_total_tokens = request.num_prompt_tokens + request.max_tokens
-        if expected_total_tokens <= cache_config.experimental_dual_kv_threshold_tokens:
+        # Large logical KV blocks are only worthwhile once a request is long
+        # enough to amortize the extra mixed-kernel overhead and coarser
+        # rounding. Keep shorter requests on the small path even if the
+        # configured threshold is low.
+        effective_large_threshold = max(
+            cache_config.experimental_dual_kv_threshold_tokens,
+            cache_config.experimental_large_kv_block_size * 32,
+        )
+        if expected_total_tokens <= effective_large_threshold:
             request.kv_size_class = "small"
             request.kv_block_size = cache_config.experimental_small_kv_block_size
         else:
@@ -1236,12 +1251,14 @@ class EngineCoreProc(EngineCore):
 
     def run_busy_loop(self):
         """Core busy loop of the EngineCore."""
+        self._start_hang_watchdog()
         while self._handle_shutdown():
             # 1) Poll the input queue until there is work to do.
             self._process_input_queue()
             # 2) Step the engine core and return the outputs.
             self._process_engine_step()
 
+        self._stop_hang_watchdog()
         raise SystemExit
 
     def _process_input_queue(self):
@@ -1278,6 +1295,7 @@ class EngineCoreProc(EngineCore):
     def _process_engine_step(self) -> bool:
         """Called only when there are unfinished local requests."""
 
+        self._last_progress_time = time.time()
         # Step the engine core.
         outputs, model_executed = self.step_fn()
         # Put EngineCoreOutputs into the output queue.
@@ -1285,6 +1303,7 @@ class EngineCoreProc(EngineCore):
             self.output_queue.put_nowait(output)
         # Post-step hook.
         self.post_step(model_executed)
+        self._last_progress_time = time.time()
 
         # If no model execution happened but there are waiting requests
         # (e.g., WAITING_FOR_REMOTE_KVS), yield the GIL briefly to allow
@@ -1294,6 +1313,40 @@ class EngineCoreProc(EngineCore):
             time.sleep(0.001)
 
         return model_executed
+
+    def _start_hang_watchdog(self) -> None:
+        if self._hang_timeout_s <= 0 or self._hang_watchdog_thread is not None:
+            return
+        faulthandler.enable()
+
+        def _watchdog() -> None:
+            while not self._hang_watchdog_stop.is_set():
+                time.sleep(1.0)
+                if self._hang_watchdog_triggered:
+                    continue
+                if not self.is_running() or not self.has_work():
+                    continue
+                elapsed = time.time() - self._last_progress_time
+                if elapsed >= self._hang_timeout_s:
+                    self._hang_watchdog_triggered = True
+                    logger.error(
+                        "EngineCore hang watchdog fired after %.1fs; dumping stacks.",
+                        elapsed,
+                    )
+                    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+
+        self._hang_watchdog_thread = threading.Thread(
+            target=_watchdog,
+            name="EngineCoreHangWatchdog",
+            daemon=True,
+        )
+        self._hang_watchdog_thread.start()
+
+    def _stop_hang_watchdog(self) -> None:
+        if self._hang_watchdog_thread is None:
+            return
+        self._hang_watchdog_stop.set()
+        self._hang_watchdog_thread.join(timeout=1.0)
 
     def _notify_idle_state_callbacks(self) -> None:
         while self._idle_state_callbacks:

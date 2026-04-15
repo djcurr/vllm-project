@@ -465,6 +465,10 @@ class GPUModelRunner(
 
         self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
         self.is_mm_prefix_lm = self.model_config.is_mm_prefix_lm
+        self._execution_timing_stats = {
+            "execute_model": {"total_ms": 0.0, "count": 0, "max_ms": 0.0},
+            "_model_forward": {"total_ms": 0.0, "count": 0, "max_ms": 0.0},
+        }
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
@@ -1049,8 +1053,9 @@ class GPUModelRunner(
 
     def _zero_block_ids(self, block_ids: list[int]) -> None:
         """Zero the KV cache memory for the given block IDs."""
-        if hasattr(self, "_kv_block_zeroer"):
-            self._kv_block_zeroer.zero_block_ids(block_ids)
+        kv_block_zeroer = getattr(self, "_kv_block_zeroer", None)
+        if kv_block_zeroer is not None:
+            kv_block_zeroer.zero_block_ids(block_ids)
 
     # Note: used for model runner override.
     def _init_device_properties(self) -> None:
@@ -3567,13 +3572,20 @@ class GPUModelRunner(
         Returns:
             Model output tensor
         """
-        return self.model(
+        start_time = time.perf_counter()
+        output = self.model(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
             **model_kwargs,
         )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        stats = self._execution_timing_stats["_model_forward"]
+        stats["total_ms"] += elapsed_ms
+        stats["count"] += 1
+        stats["max_ms"] = max(stats["max_ms"], elapsed_ms)
+        return output
 
     @staticmethod
     def _is_uniform_decode(
@@ -7292,6 +7304,24 @@ class GPUModelRunner(
             }
             self.encoder_timing_registry.clear()
             return stats
+
+    def reset_execution_timing_stats(self) -> None:
+        for stats in self._execution_timing_stats.values():
+            stats["total_ms"] = 0.0
+            stats["count"] = 0
+            stats["max_ms"] = 0.0
+
+    def get_execution_timing_stats(self) -> dict[str, dict[str, float | int]]:
+        result: dict[str, dict[str, float | int]] = {}
+        for name, stats in self._execution_timing_stats.items():
+            count = stats["count"]
+            result[name] = {
+                "total_ms": stats["total_ms"],
+                "count": count,
+                "avg_ms": (stats["total_ms"] / count) if count else 0.0,
+                "max_ms": stats["max_ms"],
+            }
+        return result
 
     @contextmanager
     def timed_encoder_operation(

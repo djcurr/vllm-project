@@ -4,6 +4,7 @@
 
 import gc
 import os
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from datetime import timedelta
@@ -139,6 +140,9 @@ class Worker(WorkerBase):
             if self.vllm_config.weight_transfer_config is not None
             else None
         )
+        self._execution_timing_stats = {
+            "worker_execute_model": {"total_ms": 0.0, "count": 0, "max_ms": 0.0},
+        }
 
         # Torch/CUDA profiler. Enabled and configured through profiler_config.
         # Profiler wrapper is created lazily in profile() when start is called,
@@ -707,6 +711,83 @@ class Worker(WorkerBase):
         """Get encoder timing stats from model runner."""
         return self.model_runner.get_encoder_timing_stats()
 
+    def reset_execution_timing_stats(self) -> None:
+        for stats in self._execution_timing_stats.values():
+            stats["total_ms"] = 0.0
+            stats["count"] = 0
+            stats["max_ms"] = 0.0
+        self.model_runner.reset_execution_timing_stats()
+
+    def get_execution_timing_stats(self) -> dict[str, dict[str, float | int]]:
+        result: dict[str, dict[str, float | int]] = {}
+        for name, stats in self._execution_timing_stats.items():
+            count = stats["count"]
+            result[name] = {
+                "total_ms": stats["total_ms"],
+                "count": count,
+                "avg_ms": (stats["total_ms"] / count) if count else 0.0,
+                "max_ms": stats["max_ms"],
+            }
+        result.update(self.model_runner.get_execution_timing_stats())
+        return result
+
+    def get_kv_memory_stats(self) -> dict[str, Any]:
+        kernel_block_size = (
+            self.model_runner._kernel_block_sizes[0]
+            if getattr(self.model_runner, "_kernel_block_sizes", None)
+            else 16
+        )
+
+        total_allocated = 0
+        total_actual = 0
+        total_waste = 0
+        by_class: dict[str, dict[str, int]] = {}
+
+        for req in self.model_runner.requests.values():
+            seq_len = req.num_computed_tokens
+            logical_block_size = req.kv_block_size or kernel_block_size
+            num_kernel_blocks = len(req.block_ids[0]) if req.block_ids else 0
+            blocks_per_logical = max(1, logical_block_size // kernel_block_size)
+            num_logical_blocks = num_kernel_blocks // blocks_per_logical
+            allocated = num_logical_blocks * logical_block_size
+            waste = max(0, allocated - seq_len)
+
+            total_allocated += allocated
+            total_actual += seq_len
+            total_waste += waste
+
+            size_class = req.kv_size_class or "default"
+            stats = by_class.setdefault(
+                size_class,
+                {"count": 0, "allocated": 0, "actual": 0, "waste": 0},
+            )
+            stats["count"] += 1
+            stats["allocated"] += allocated
+            stats["actual"] += seq_len
+            stats["waste"] += waste
+
+        return {
+            "kernel_block_size": kernel_block_size,
+            "total_allocated": total_allocated,
+            "total_actual": total_actual,
+            "total_waste": total_waste,
+            "by_class": by_class,
+        }
+
+    def get_kv_memory_debug(self) -> dict[str, Any]:
+        debug: dict[str, Any] = {}
+        for req_id, req in self.model_runner.requests.items():
+            debug[req_id] = {
+                "num_computed_tokens": req.num_computed_tokens,
+                "kv_block_size": req.kv_block_size,
+                "kv_size_class": req.kv_size_class,
+                "block_ids_len": [len(block_ids) for block_ids in req.block_ids]
+                if req.block_ids
+                else [],
+                "block_ids": req.block_ids,
+            }
+        return debug
+
     def annotate_profile(self, scheduler_output):
         # add trace annotation so that we can easily distinguish
         # context/generation request numbers in each iteration.
@@ -743,92 +824,100 @@ class Worker(WorkerBase):
     def execute_model(
         self, scheduler_output: "SchedulerOutput"
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
-        # ensure any previous non-blocking PP sends are complete
-        if self._pp_send_work:
-            for handle in self._pp_send_work:
-                handle.wait()
-            self._pp_send_work = []
+        execute_model_start = time.perf_counter()
+        try:
+            # ensure any previous non-blocking PP sends are complete
+            if self._pp_send_work:
+                for handle in self._pp_send_work:
+                    handle.wait()
+                self._pp_send_work = []
 
-        intermediate_tensors = None
-        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        all_gather_tensors = {}
-        compilation_config = self.vllm_config.compilation_config
-        parallel_config = self.vllm_config.parallel_config
+            intermediate_tensors = None
+            forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+            num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+            all_gather_tensors = {}
+            compilation_config = self.vllm_config.compilation_config
+            parallel_config = self.vllm_config.parallel_config
 
-        if (
-            parallel_config.pipeline_parallel_size > 1
-            and compilation_config.pass_config.enable_sp
-            and forward_pass
-        ):
+            if (
+                parallel_config.pipeline_parallel_size > 1
+                and compilation_config.pass_config.enable_sp
+                and forward_pass
+            ):
             # currently only supported by V1 GPUModelRunner
-            assert not self.use_v2_model_runner
-            num_scheduled_tokens_np = np.array(
-                list(scheduler_output.num_scheduled_tokens.values()),
-                dtype=np.int32,
-            )
+                assert not self.use_v2_model_runner
+                num_scheduled_tokens_np = np.array(
+                    list(scheduler_output.num_scheduled_tokens.values()),
+                    dtype=np.int32,
+                )
             # TODO(lucas): This is pretty gross; ideally we should only ever call
             # `_determine_batch_execution_and_padding` once (will get called again
             # in `execute_model`) but this requires a larger refactor of PP.
-            _, batch_desc, _, _, _ = (
-                self.model_runner._determine_batch_execution_and_padding(
-                    num_tokens=num_scheduled_tokens,
-                    num_reqs=len(num_scheduled_tokens_np),
-                    num_scheduled_tokens_np=num_scheduled_tokens_np,
-                    max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
-                    use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
+                _, batch_desc, _, _, _ = (
+                    self.model_runner._determine_batch_execution_and_padding(
+                        num_tokens=num_scheduled_tokens,
+                        num_reqs=len(num_scheduled_tokens_np),
+                        num_scheduled_tokens_np=num_scheduled_tokens_np,
+                        max_num_scheduled_tokens=num_scheduled_tokens_np.max(),
+                        use_cascade_attn=False,  # TODO(lucas): Handle cascade attention
+                    )
                 )
-            )
-            all_gather_tensors = {
-                "residual": not is_residual_scattered_for_sp(
-                    self.vllm_config, batch_desc.num_tokens
+                all_gather_tensors = {
+                    "residual": not is_residual_scattered_for_sp(
+                        self.vllm_config, batch_desc.num_tokens
+                    )
+                }
+
+            if forward_pass and not get_pp_group().is_first_rank:
+                tensor_dict, comm_handles, comm_postprocess = (
+                    get_pp_group().irecv_tensor_dict(
+                        all_gather_group=get_tp_group(),
+                        all_gather_tensors=all_gather_tensors,
+                    )
                 )
-            }
-
-        if forward_pass and not get_pp_group().is_first_rank:
-            tensor_dict, comm_handles, comm_postprocess = (
-                get_pp_group().irecv_tensor_dict(
-                    all_gather_group=get_tp_group(),
-                    all_gather_tensors=all_gather_tensors,
+                assert tensor_dict is not None
+                intermediate_tensors = AsyncIntermediateTensors(
+                    tensor_dict,
+                    comm_handles=comm_handles,
+                    comm_postprocess=comm_postprocess,
                 )
+
+            with self.annotate_profile(scheduler_output):
+                output = self.model_runner.execute_model(
+                    scheduler_output, intermediate_tensors
+                )
+                if (
+                    self.use_v2_model_runner
+                    and self.model_runner.is_pooling_model
+                    and output is None
+                ):
+                    output = self.model_runner.pool()  # type: ignore
+                if isinstance(
+                    output, ModelRunnerOutput | AsyncModelRunnerOutput | NoneType
+                ):
+                    return output
+
+            assert isinstance(output, IntermediateTensors)
+            parallel_config = self.vllm_config.parallel_config
+            assert (
+                parallel_config.distributed_executor_backend != "external_launcher"
+                and not get_pp_group().is_last_rank
             )
-            assert tensor_dict is not None
-            intermediate_tensors = AsyncIntermediateTensors(
-                tensor_dict,
-                comm_handles=comm_handles,
-                comm_postprocess=comm_postprocess,
+
+            # launch non-blocking send of intermediate tensors
+            self._pp_send_work = get_pp_group().isend_tensor_dict(
+                output.tensors,
+                all_gather_group=get_tp_group(),
+                all_gather_tensors=all_gather_tensors,
             )
 
-        with self.annotate_profile(scheduler_output):
-            output = self.model_runner.execute_model(
-                scheduler_output, intermediate_tensors
-            )
-            if (
-                self.use_v2_model_runner
-                and self.model_runner.is_pooling_model
-                and output is None
-            ):
-                output = self.model_runner.pool()  # type: ignore
-            if isinstance(
-                output, ModelRunnerOutput | AsyncModelRunnerOutput | NoneType
-            ):
-                return output
-
-        assert isinstance(output, IntermediateTensors)
-        parallel_config = self.vllm_config.parallel_config
-        assert (
-            parallel_config.distributed_executor_backend != "external_launcher"
-            and not get_pp_group().is_last_rank
-        )
-
-        # launch non-blocking send of intermediate tensors
-        self._pp_send_work = get_pp_group().isend_tensor_dict(
-            output.tensors,
-            all_gather_group=get_tp_group(),
-            all_gather_tensors=all_gather_tensors,
-        )
-
-        return None
+            return None
+        finally:
+            elapsed_ms = (time.perf_counter() - execute_model_start) * 1000
+            stats = self._execution_timing_stats["worker_execute_model"]
+            stats["total_ms"] += elapsed_ms
+            stats["count"] += 1
+            stats["max_ms"] = max(stats["max_ms"], elapsed_ms)
 
     def take_draft_token_ids(self) -> DraftTokenIds | None:
         return self.model_runner.take_draft_token_ids()
