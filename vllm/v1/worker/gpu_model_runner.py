@@ -381,8 +381,18 @@ class ExecuteModelState(NamedTuple):
     sample_hidden_states: torch.Tensor
     aux_hidden_states: list[torch.Tensor] | None
     ec_connector_output: ECConnectorOutput | None
+    kv_connector_output: KVConnectorOutput | None
     cudagraph_stats: CUDAGraphStat | None
     slot_mappings: dict[str, torch.Tensor] | list[dict[str, torch.Tensor]] | None
+
+
+@dataclass
+class DualKVPoolMapping:
+    kv_size_class: str
+    logical_block_sizes: list[int]
+    kernel_block_sizes: list[int]
+    blocks_per_logical_block: list[int]
+    kernel_block_offsets: list[int]
 
 
 class GPUModelRunner(
@@ -496,6 +506,7 @@ class GPUModelRunner(
         # indexes: [kv_cache_group_id][attn_group]
         self.attn_groups: list[list[AttentionGroup]] = []
         # self.kv_cache_config: KVCacheConfig
+        self.dual_kv_pool_mappings: dict[str, DualKVPoolMapping] = {}
 
         # mm_hash ->  encoder_output
         self.encoder_cache: dict[str, torch.Tensor] = {}
@@ -1079,8 +1090,11 @@ class GPUModelRunner(
 
         # Zero GPU memory for freshly allocated cache blocks to prevent
         # stale NaN/data from corrupting attention or SSM computation.
-        if scheduler_output.new_block_ids_to_zero:
-            self._zero_block_ids(scheduler_output.new_block_ids_to_zero)
+        new_block_ids_to_zero = self._normalize_dual_kv_zero_block_ids(
+            scheduler_output
+        )
+        if new_block_ids_to_zero:
+            self._zero_block_ids(new_block_ids_to_zero)
 
         # Free the cached encoder outputs.
         for mm_hash in scheduler_output.free_encoder_mm_hashes:
@@ -1156,10 +1170,14 @@ class GPUModelRunner(
                 sampling_params=sampling_params,
                 pooling_params=pooling_params,
                 generator=generator,
-                block_ids=new_req_data.block_ids,
+                block_ids=self._normalize_dual_kv_block_ids(
+                    new_req_data.block_ids, new_req_data.kv_size_class
+                ),
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
+                kv_size_class=new_req_data.kv_size_class,
+                kv_block_size=new_req_data.kv_block_size,
             )
             self.requests[req_id] = req_state
             self.late_interaction_runner.register_request(req_id, pooling_params)
@@ -1210,7 +1228,9 @@ class GPUModelRunner(
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
             num_computed_tokens = req_data.num_computed_tokens[i]
-            new_block_ids = req_data.new_block_ids[i]
+            new_block_ids = self._normalize_dual_kv_new_block_ids(
+                req_data.new_block_ids[i], req_state.kv_size_class
+            )
             resumed_from_preemption = req_id in req_data.resumed_req_ids
             num_output_tokens = req_data.num_output_tokens[i]
             req_index = self.input_batch.req_id_to_index.get(req_id)
@@ -1486,7 +1506,11 @@ class GPUModelRunner(
         req_state.sampling_params = new_req_data.sampling_params
         req_state.pooling_params = new_req_data.pooling_params
         self.late_interaction_runner.register_request(req_id, req_state.pooling_params)
-        req_state.block_ids = new_req_data.block_ids
+        req_state.kv_size_class = new_req_data.kv_size_class
+        req_state.kv_block_size = new_req_data.kv_block_size
+        req_state.block_ids = self._normalize_dual_kv_block_ids(
+            new_req_data.block_ids, new_req_data.kv_size_class
+        )
         req_state.num_computed_tokens = new_req_data.num_computed_tokens
         req_state.num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
             req_state.prompt_token_ids, req_state.prompt_embeds
@@ -2176,6 +2200,35 @@ class GPUModelRunner(
             seq_lens_cpu = None
             num_computed_tokens_cpu = None
 
+        # Compute per-request logical-to-kernel block multipliers for the
+        # mixed-block-size attention kernels.
+        block_size_multipliers = None
+        kernel_block_size = None
+        if (
+            self.cache_config.experimental_dual_kv_blocks
+            and self.dual_kv_pool_mappings
+        ):
+            kernel_block_size = self._kernel_block_sizes[0]
+            multipliers_list = []
+            req_ids = self.input_batch.req_ids[:num_reqs]
+            for req_id in req_ids:
+                req_state = self.requests.get(req_id)
+                if req_state is None or req_state.kv_block_size is None:
+                    multipliers_list.append(1)
+                    continue
+                if req_state.kv_block_size % kernel_block_size != 0:
+                    raise ValueError(
+                        "Request KV block size must be divisible by kernel "
+                        f"block size ({req_state.kv_block_size} vs "
+                        f"{kernel_block_size})"
+                    )
+                multipliers_list.append(req_state.kv_block_size // kernel_block_size)
+            # Pad to num_reqs_padded
+            multipliers_list.extend([1] * (num_reqs_padded - num_reqs))
+            block_size_multipliers = torch.tensor(
+                multipliers_list, dtype=torch.int32, device=self.device
+            )
+
         cm_base = CommonAttentionMetadata(
             query_start_loc=self.query_start_loc.gpu[: num_reqs_padded + 1],
             query_start_loc_cpu=self.query_start_loc.cpu[: num_reqs_padded + 1],
@@ -2190,6 +2243,8 @@ class GPUModelRunner(
             slot_mapping=slot_mapping_gid_0,
             causal=True,
             is_prefilling=is_prefilling,
+            block_size_multipliers=block_size_multipliers,
+            kernel_block_size=kernel_block_size,
         )
 
         if self.dcp_world_size > 1:
@@ -3777,7 +3832,6 @@ class GPUModelRunner(
                 "State error: sample_tokens() must be called "
                 "after execute_model() returns None."
             )
-
         if self.routed_experts_initialized:
             capturer = RoutedExpertsCapturer.get_instance()
             if capturer is not None:
@@ -3867,7 +3921,7 @@ class GPUModelRunner(
                 cascade_attn_prefix_lens = self._compute_cascade_attn_prefix_lens(
                     num_scheduled_tokens_np,
                     self.input_batch.num_computed_tokens_cpu[:num_reqs],
-                    scheduler_output.num_common_prefix_blocks,
+                    self._get_cascade_common_prefix_blocks(scheduler_output),
                 )
 
             (
@@ -4107,6 +4161,7 @@ class GPUModelRunner(
             sample_hidden_states,
             aux_hidden_states,
             ec_connector_output,
+            kv_connector_output,
             cudagraph_stats,
             slot_mappings,
         )
@@ -4151,6 +4206,7 @@ class GPUModelRunner(
             sample_hidden_states,
             aux_hidden_states,
             ec_connector_output,
+            kv_connector_output,
             cudagraph_stats,
             slot_mappings,
         ) = self.execute_model_state
@@ -4303,7 +4359,6 @@ class GPUModelRunner(
             self.eplb_step()
 
         # self.kv_connector_output may be modified during drafting
-        kv_connector_output = self.kv_connector_output
         self.kv_connector_output = None
 
         with record_function_or_nullcontext("gpu_model_runner: ModelRunnerOutput"):
@@ -6213,6 +6268,21 @@ class GPUModelRunner(
         # Check if attention backend supports PCP&DCP and related features.
         check_attention_cp_compatibility(self.vllm_config)
 
+        cache_config = self.vllm_config.cache_config
+        if cache_config.experimental_dual_kv_blocks:
+            for backend_set in attention_backend_list:
+                for backend in backend_set:
+                    for block_size in (
+                        cache_config.experimental_small_kv_block_size,
+                        cache_config.experimental_large_kv_block_size,
+                    ):
+                        if not backend.supports_block_size(block_size):
+                            raise ValueError(
+                                "experimental_dual_kv_blocks requires all attention "
+                                f"backends to support block size {block_size}, but "
+                                f"{backend.get_name()} does not"
+                            )
+
         for i, attn_backend_map in enumerate(attention_backend_maps):
             self.attn_groups.append(create_attn_groups(attn_backend_map, i))
 
@@ -6511,6 +6581,75 @@ class GPUModelRunner(
             f"!= kv_cache kernel_block_sizes {kernel_block_sizes}"
         )
 
+    def _uses_unified_dual_kv_runtime(self) -> bool:
+        return bool(self.dual_kv_pool_mappings)
+
+    def _normalize_dual_kv_block_ids_for_group(
+        self,
+        block_ids: list[int],
+        kv_size_class: str,
+        kv_cache_group_id: int = 0,
+    ) -> list[int]:
+        if not self._uses_unified_dual_kv_runtime():
+            return list(block_ids)
+
+        mapping = self.dual_kv_pool_mappings[kv_size_class]
+        blocks_per_logical_block = mapping.blocks_per_logical_block[kv_cache_group_id]
+        kernel_block_offset = mapping.kernel_block_offsets[kv_cache_group_id]
+        if blocks_per_logical_block == 1:
+            return [kernel_block_offset + block_id for block_id in block_ids]
+
+        normalized: list[int] = []
+        for block_id in block_ids:
+            start = kernel_block_offset + block_id * blocks_per_logical_block
+            normalized.extend(range(start, start + blocks_per_logical_block))
+        return normalized
+
+    def _normalize_dual_kv_block_ids(
+        self,
+        block_ids: tuple[list[int], ...],
+        kv_size_class: str,
+    ) -> tuple[list[int], ...]:
+        if not self._uses_unified_dual_kv_runtime():
+            return tuple(list(group_ids) for group_ids in block_ids)
+
+        return tuple(
+            self._normalize_dual_kv_block_ids_for_group(
+                group_ids, kv_size_class, kv_cache_group_id
+            )
+            for kv_cache_group_id, group_ids in enumerate(block_ids)
+        )
+
+    def _normalize_dual_kv_new_block_ids(
+        self,
+        new_block_ids: tuple[list[int], ...] | None,
+        kv_size_class: str,
+    ) -> tuple[list[int], ...] | None:
+        if new_block_ids is None:
+            return None
+        return self._normalize_dual_kv_block_ids(new_block_ids, kv_size_class)
+
+    def _normalize_dual_kv_zero_block_ids(
+        self, scheduler_output: "SchedulerOutput"
+    ) -> list[int]:
+        if not self._uses_unified_dual_kv_runtime():
+            return scheduler_output.new_block_ids_to_zero or []
+
+        # For unified dual KV runtime, all block IDs are already normalized
+        # in the scheduler. Just return them as-is.
+        return scheduler_output.new_block_ids_to_zero or []
+
+    def _get_cascade_common_prefix_blocks(
+        self, scheduler_output: "SchedulerOutput"
+    ) -> list[int]:
+        # The scheduler reports common-prefix counts in logical manager blocks.
+        # The unified dual-KV runtime exposes a single kernel block size, so the
+        # logical counts are no longer globally meaningful across mixed classes.
+        # Disable cascade attention for this experimental mode.
+        if self._uses_unified_dual_kv_runtime():
+            return [0] * len(self.kv_cache_config.kv_cache_groups)
+        return scheduler_output.num_common_prefix_blocks
+
     def _allocate_kv_cache_tensors(
         self, kv_cache_config: KVCacheConfig
     ) -> dict[str, torch.Tensor]:
@@ -6766,6 +6905,193 @@ class GPUModelRunner(
                 else:
                     break
 
+    @staticmethod
+    def _get_layer_kv_cache_spec(
+        kv_cache_group: KVCacheGroupSpec, layer_name: str
+    ) -> KVCacheSpec:
+        kv_cache_spec = kv_cache_group.kv_cache_spec
+        if isinstance(kv_cache_spec, UniformTypeKVCacheSpecs):
+            return kv_cache_spec.kv_cache_specs[layer_name]
+        return kv_cache_spec
+
+    def _allocate_attention_kv_cache_tensor(
+        self,
+        attn_backend: type[AttentionBackend],
+        kv_cache_spec: AttentionSpec,
+        kernel_num_blocks: int,
+        kernel_block_size: int,
+    ) -> torch.Tensor:
+        kv_cache_shape = attn_backend.get_kv_cache_shape(
+            kernel_num_blocks,
+            kernel_block_size,
+            kv_cache_spec.num_kv_heads,
+            kv_cache_spec.head_size,
+            cache_dtype_str=self.cache_config.cache_dtype,
+        )
+        try:
+            kv_cache_stride_order = attn_backend.get_kv_cache_stride_order()
+            assert len(kv_cache_stride_order) == len(kv_cache_shape)
+        except (AttributeError, NotImplementedError):
+            kv_cache_stride_order = tuple(range(len(kv_cache_shape)))
+
+        physical_shape = tuple(kv_cache_shape[i] for i in kv_cache_stride_order)
+        inv_order = [
+            kv_cache_stride_order.index(i) for i in range(len(kv_cache_stride_order))
+        ]
+        return torch.zeros(
+            physical_shape,
+            dtype=kv_cache_spec.dtype,
+            device=self.device,
+        ).permute(*inv_order)
+
+    def _build_dual_kv_pool_mappings(
+        self,
+        small_config: KVCacheConfig,
+        large_config: KVCacheConfig,
+        kernel_block_sizes: list[int],
+    ) -> dict[str, DualKVPoolMapping]:
+        if len(small_config.kv_cache_groups) != len(large_config.kv_cache_groups):
+            raise ValueError(
+                "Dual KV runtime requires small and large KV configs to have the "
+                "same number of KV cache groups"
+            )
+
+        small_offsets = [0] * len(kernel_block_sizes)
+        large_offsets = [0] * len(kernel_block_sizes)
+        running_kernel_offset = 0
+        for gid, kernel_block_size in enumerate(kernel_block_sizes):
+            small_group = small_config.kv_cache_groups[gid]
+            large_group = large_config.kv_cache_groups[gid]
+            small_spec = self._get_layer_kv_cache_spec(
+                small_group, small_group.layer_names[0]
+            )
+            large_spec = self._get_layer_kv_cache_spec(
+                large_group, large_group.layer_names[0]
+            )
+            if not isinstance(small_spec, AttentionSpec) or not isinstance(
+                large_spec, AttentionSpec
+            ):
+                raise ValueError(
+                    "Unified dual KV runtime only supports attention KV cache "
+                    "groups"
+                )
+            if large_spec.block_size % kernel_block_size != 0:
+                raise ValueError(
+                    "Large KV block size must be divisible by the shared kernel "
+                    "block size"
+                )
+
+            small_offsets[gid] = running_kernel_offset
+            running_kernel_offset += (
+                small_config.num_blocks * (small_spec.block_size // kernel_block_size)
+            )
+            large_offsets[gid] = running_kernel_offset
+            running_kernel_offset += (
+                large_config.num_blocks * (large_spec.block_size // kernel_block_size)
+            )
+
+        return {
+            "small": DualKVPoolMapping(
+                kv_size_class="small",
+                logical_block_sizes=[
+                    self._get_layer_kv_cache_spec(group, group.layer_names[0]).block_size
+                    for group in small_config.kv_cache_groups
+                ],
+                kernel_block_sizes=kernel_block_sizes.copy(),
+                blocks_per_logical_block=[
+                    self._get_layer_kv_cache_spec(group, group.layer_names[0]).block_size
+                    // kernel_block_sizes[gid]
+                    for gid, group in enumerate(small_config.kv_cache_groups)
+                ],
+                kernel_block_offsets=small_offsets,
+            ),
+            "large": DualKVPoolMapping(
+                kv_size_class="large",
+                logical_block_sizes=[
+                    self._get_layer_kv_cache_spec(group, group.layer_names[0]).block_size
+                    for group in large_config.kv_cache_groups
+                ],
+                kernel_block_sizes=kernel_block_sizes.copy(),
+                blocks_per_logical_block=[
+                    self._get_layer_kv_cache_spec(group, group.layer_names[0]).block_size
+                    // kernel_block_sizes[gid]
+                    for gid, group in enumerate(large_config.kv_cache_groups)
+                ],
+                kernel_block_offsets=large_offsets,
+            ),
+        }
+
+    def _initialize_unified_dual_kv_cache_context(
+        self,
+        small_config: KVCacheConfig,
+        large_config: KVCacheConfig,
+    ) -> None:
+        self.kv_cache_config = small_config
+        self.kv_cache_config.aux_kv_cache_configs = None
+        self.attn_groups = []
+        self.kv_caches = []
+        self.cross_layers_kv_cache = None
+        self.cross_layers_attn_backend = None
+
+        self.may_add_encoder_only_layers_to_kv_cache_config()
+        self.maybe_add_kv_sharing_layers_to_kv_cache_groups(self.kv_cache_config)
+        self.maybe_add_kv_sharing_layers_to_kv_cache_groups(large_config)
+        self.initialize_attn_backend(self.kv_cache_config)
+        kernel_block_sizes = prepare_kernel_block_sizes(
+            self.kv_cache_config, self.attn_groups
+        )
+        self._kernel_block_sizes = kernel_block_sizes
+        self.initialize_metadata_builders(self.kv_cache_config, kernel_block_sizes)
+        self.may_reinitialize_input_batch(self.kv_cache_config, kernel_block_sizes)
+        self.dual_kv_pool_mappings = self._build_dual_kv_pool_mappings(
+            self.kv_cache_config, large_config, kernel_block_sizes
+        )
+
+        kv_caches: dict[str, torch.Tensor] = {}
+        for gid, attn_groups in enumerate(self.attn_groups):
+            kernel_block_size = kernel_block_sizes[gid]
+            small_group = self.kv_cache_config.kv_cache_groups[gid]
+            large_group = large_config.kv_cache_groups[gid]
+            for attn_group in attn_groups:
+                for layer_name in attn_group.layer_names:
+                    if layer_name in self.runner_only_attn_layers:
+                        continue
+                    small_spec = self._get_layer_kv_cache_spec(small_group, layer_name)
+                    large_spec = self._get_layer_kv_cache_spec(large_group, layer_name)
+                    if not isinstance(small_spec, AttentionSpec) or not isinstance(
+                        large_spec, AttentionSpec
+                    ):
+                        raise ValueError(
+                            "Unified dual KV runtime only supports attention KV "
+                            "cache groups"
+                        )
+                    small_kernel_blocks = self.kv_cache_config.num_blocks * (
+                        small_spec.block_size // kernel_block_size
+                    )
+                    large_kernel_blocks = large_config.num_blocks * (
+                        large_spec.block_size // kernel_block_size
+                    )
+                    kv_caches[layer_name] = self._allocate_attention_kv_cache_tensor(
+                        attn_group.backend,
+                        small_spec.copy_with_new_block_size(kernel_block_size),
+                        small_kernel_blocks + large_kernel_blocks,
+                        kernel_block_size,
+                    )
+
+        for layer_name, target_layer_name in self.shared_kv_cache_layers.items():
+            logger.debug("%s reuses KV cache of %s", layer_name, target_layer_name)
+            kv_caches[layer_name] = kv_caches[target_layer_name]
+
+        num_attn_module = (
+            2 if self.model_config.hf_config.model_type == "longcat_flash" else 1
+        )
+        bind_kv_cache(
+            kv_caches,
+            self.compilation_config.static_forward_context,
+            self.kv_caches,
+            num_attn_module,
+        )
+
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         """
         Initialize KV cache based on `kv_cache_config`.
@@ -6774,25 +7100,36 @@ class GPUModelRunner(
             cache size of each layer
         """
         kv_cache_config = deepcopy(kv_cache_config)
-        self.kv_cache_config = kv_cache_config
         self._mamba_copy_bufs = None
+        if not (
+            self.cache_config.experimental_dual_kv_blocks
+            and kv_cache_config.aux_kv_cache_configs
+        ):
+            self._initialize_single_kv_cache_context(kv_cache_config)
+            self.dual_kv_pool_mappings = {}
+            return
+
+        large_config = deepcopy(kv_cache_config.aux_kv_cache_configs["large"])
+        self._initialize_unified_dual_kv_cache_context(kv_cache_config, large_config)
+
+    def _initialize_single_kv_cache_context(
+        self,
+        kv_cache_config: KVCacheConfig,
+    ) -> None:
+        self.dual_kv_pool_mappings = {}
+        self.kv_cache_config = kv_cache_config
+        self.attn_groups = []
+        self.kv_caches = []
+        self.cross_layers_kv_cache = None
+        self.cross_layers_attn_backend = None
         self.may_add_encoder_only_layers_to_kv_cache_config()
         self.maybe_add_kv_sharing_layers_to_kv_cache_groups(kv_cache_config)
         self.initialize_attn_backend(kv_cache_config)
-        # The kernel block size for all KV cache groups. For example, if
-        # kv_cache_manager uses block_size 256 for a given group, but the attention
-        # backends for that group only supports block_size 64, we will return
-        # kernel_block_size 64 and split the 256-token-block to 4 blocks with 64
-        # tokens each.
         kernel_block_sizes = prepare_kernel_block_sizes(
             kv_cache_config, self.attn_groups
         )
         self._kernel_block_sizes = kernel_block_sizes
-
-        # create metadata builders
         self.initialize_metadata_builders(kv_cache_config, kernel_block_sizes)
-
-        # Reinitialize need to after initialize_attn_backend
         self.may_reinitialize_input_batch(kv_cache_config, kernel_block_sizes)
         kv_caches = self.initialize_kv_cache_tensors(
             kv_cache_config, kernel_block_sizes
@@ -6803,8 +7140,6 @@ class GPUModelRunner(
             and self.speculative_config.uses_extract_hidden_states()
         ):
             assert isinstance(self.drafter, ExtractHiddenStatesProposer)
-            # validate all draft model layers belong to the same kv cache
-            # group
             self.drafter.validate_same_kv_cache_group(kv_cache_config)
 
         if has_kv_transfer_group():

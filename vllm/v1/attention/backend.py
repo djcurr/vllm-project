@@ -367,6 +367,13 @@ class CommonAttentionMetadata:
     (num_computed_tokens < num_prompt_tokens). Used by some backends to
     distinguish actual decodes from short extends."""
 
+    # For mixed block size support (experimental dual KV blocks).
+    # Per-request block size multipliers. Each element indicates how many
+    # kernel blocks correspond to one logical block for that sequence.
+    # None means all sequences use multiplier=1 (standard single block size).
+    block_size_multipliers: torch.Tensor | None = None
+    kernel_block_size: int | None = None
+
     # WARNING: Deprecated fields. Will be removed in a future release (v0.15.0)
     _seq_lens_cpu: torch.Tensor | None = None
     _num_computed_tokens_cpu: torch.Tensor | None = None

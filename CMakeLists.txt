@@ -285,6 +285,8 @@ set(VLLM_EXT_SRC
   "csrc/cache_kernels_fused.cu"
   "csrc/attention/paged_attention_v1.cu"
   "csrc/attention/paged_attention_v2.cu"
+  "csrc/attention/paged_attention_v1_mixed.cu"
+  "csrc/attention/paged_attention_v2_mixed.cu"
   "csrc/attention/merge_attn_states.cu"
   "csrc/attention/vertical_slash_index.cu"
   "csrc/pos_encoding_kernels.cu"

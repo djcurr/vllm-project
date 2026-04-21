@@ -63,6 +63,35 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "    int blocksparse_head_sliding_step) -> ()");
   ops.impl("paged_attention_v2", torch::kCUDA, &paged_attention_v2);
 
+  // PagedAttention V1 Mixed (experimental dual-size KV blocks).
+  // Supports mixed block sizes within a single batch by using per-request
+  // block size multipliers.
+  ops.def(
+      "paged_attention_v1_mixed("
+      "    Tensor! out, Tensor query, Tensor key_cache,"
+      "    Tensor value_cache, int num_kv_heads, float scale,"
+      "    Tensor block_tables, Tensor seq_lens, Tensor block_size_multipliers,"
+      "    int max_seq_len, int kernel_block_size, Tensor? alibi_slopes,"
+      "    str kv_cache_dtype, Tensor k_scale, Tensor v_scale,"
+      "    int tp_rank, int blocksparse_local_blocks,"
+      "    int blocksparse_vert_stride, int blocksparse_block_size,"
+      "    int blocksparse_head_sliding_step) -> ()");
+  ops.impl("paged_attention_v1_mixed", torch::kCUDA, &paged_attention_v1_mixed);
+
+  // PagedAttention V2 Mixed (experimental dual-size KV blocks).
+  ops.def(
+      "paged_attention_v2_mixed("
+      "    Tensor! out, Tensor! exp_sums, Tensor! max_logits,"
+      "    Tensor! tmp_out, Tensor query, Tensor key_cache,"
+      "    Tensor value_cache, int num_kv_heads, float scale,"
+      "    Tensor block_tables, Tensor seq_lens, Tensor block_size_multipliers,"
+      "    int max_seq_len, int kernel_block_size, Tensor? alibi_slopes,"
+      "    str kv_cache_dtype, Tensor k_scale, Tensor v_scale,"
+      "    int tp_rank, int blocksparse_local_blocks,"
+      "    int blocksparse_vert_stride, int blocksparse_block_size,"
+      "    int blocksparse_head_sliding_step) -> ()");
+  ops.impl("paged_attention_v2_mixed", torch::kCUDA, &paged_attention_v2_mixed);
+
   // Merge attn states
   // Implements section 2.2 of https://www.arxiv.org/pdf/2501.01005
   // can be used to combine partial attention results (in the split-KV case)
