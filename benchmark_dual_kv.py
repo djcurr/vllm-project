@@ -475,6 +475,8 @@ def main():
     parser.add_argument("--dual-kv", action="store_true", help="Run dual-size only")
     parser.add_argument("--model", default="meta-llama/Llama-2-7b-chat-hf", help="Model name")
     parser.add_argument("--num-requests", type=int, default=100, help="Number of requests")
+    parser.add_argument("--short-ratio", type=float, default=0.7,
+                        help="Fraction of requests that are short (default: 0.7)")
     parser.add_argument("--hang-timeout", type=float, default=0,
                         help="Seconds before dumping stacks and failing (0 disables)")
     parser.add_argument("--debug", action="store_true", help="(deprecated) verbose iteration logs are now controlled by VLLM_LOGGING_LEVEL")
@@ -482,16 +484,18 @@ def main():
     
     model = args.model
     num_requests = args.num_requests
-    
+    short_ratio = args.short_ratio
+
     print("=" * 60)
     print("Dual-Size KV Cache Benchmark")
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Requests: {num_requests}")
-    
+    print(f"Short ratio: {short_ratio:.0%}")
+
     # Generate workload once
-    print("\nGenerating mixed workload (70% short, 30% long)...")
-    workload = generate_workload(num_requests=num_requests, short_ratio=0.7)
+    print(f"\nGenerating workload ({short_ratio:.0%} short)...")
+    workload = generate_workload(num_requests=num_requests, short_ratio=short_ratio)
     
     short_reqs = [r for r in workload if r.output_len <= 100]
     long_reqs = [r for r in workload if r.output_len > 100]
@@ -508,23 +512,20 @@ def main():
     run_dual = args.dual_kv or not args.baseline
     
     if run_baseline:
-        # Fixed 16 - standard config
-        engine_args = {
-            "block_size": 16,
-            "max_num_seqs": 128,
-            "gpu_memory_utilization": 0.85,
-            "enforce_eager": True,
-            "enable_prefix_caching": False,
-        }
-        # iteration logs disabled by default for cleaner benchmark output
-
-        results.append(benchmark(
-            name="Fixed-16",
-            workload=workload,
-            model=model,
-            engine_args=engine_args,
-            hang_timeout_s=hang_timeout_s,
-        ))
+        for block_size in (16, 32):
+            results.append(benchmark(
+                name=f"Fixed-{block_size}",
+                workload=workload,
+                model=model,
+                engine_args={
+                    "block_size": block_size,
+                    "max_num_seqs": 128,
+                    "gpu_memory_utilization": 0.85,
+                    "enforce_eager": True,
+                    "enable_prefix_caching": False,
+                },
+                hang_timeout_s=hang_timeout_s,
+            ))
     
     if run_dual:
         # Dual-size - need to use env var and the engine args from your implementation
@@ -555,19 +556,20 @@ def main():
         ))
     
     # Summary
-    if len(results) == 2:
+    if len(results) >= 2:
         print("\n" + "=" * 60)
         print("SUMMARY")
         print("=" * 60)
-        
-        fixed_16 = results[0]
-        dual_size = results[1]
-        
-        print(f"Fixed-16:     {fixed_16['throughput_tokens_per_sec']:.2f} tok/s")
-        print(f"Dual-Size:    {dual_size['throughput_tokens_per_sec']:.2f} tok/s")
-        
-        improvement = (dual_size['throughput_tokens_per_sec'] / fixed_16['throughput_tokens_per_sec'] - 1) * 100
-        print(f"Improvement:  {improvement:+.1f}%")
+
+        for r in results:
+            print(f"{r['config']:<16} {r['throughput_tokens_per_sec']:.2f} tok/s")
+
+        # Show improvement of dual vs fixed-16 if both are present
+        fixed_16 = next((r for r in results if r['config'] == 'Fixed-16'), None)
+        dual_size = next((r for r in results if 'Dual' in r['config']), None)
+        if fixed_16 and dual_size:
+            improvement = (dual_size['throughput_tokens_per_sec'] / fixed_16['throughput_tokens_per_sec'] - 1) * 100
+            print(f"Dual vs Fixed-16:  {improvement:+.1f}%")
     
     # Save results
     with open("benchmark_results.json", "w") as f:
