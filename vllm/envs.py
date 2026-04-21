@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     CUDA_VISIBLE_DEVICES: str | None = None
     VLLM_ENGINE_ITERATION_TIMEOUT_S: int = 60
     VLLM_ENGINE_READY_TIMEOUT_S: int = 600
+    VLLM_ENGINECORE_HANG_TIMEOUT: int = 0
     VLLM_API_KEY: str | None = None
     VLLM_DEBUG_LOG_API_SERVER_RESPONSE: bool = False
     S3_ACCESS_KEY_ID: str | None = None
@@ -508,6 +509,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Enable mixed-kernel path for experimental dual-size KV blocks.
     "VLLM_EXPERIMENTAL_DUAL_KV_MIXED_KERNEL": lambda: bool(
         int(os.getenv("VLLM_EXPERIMENTAL_DUAL_KV_MIXED_KERNEL", "0"))
+    ),
+    # Dump EngineCore thread stacks if no progress is observed for this many
+    # seconds while work is pending. Set to 0 to disable.
+    "VLLM_ENGINECORE_HANG_TIMEOUT": lambda: int(
+        os.getenv("VLLM_ENGINECORE_HANG_TIMEOUT", "0")
     ),
     # Maximum number of compilation jobs to run in parallel.
     # By default this is the number of CPUs

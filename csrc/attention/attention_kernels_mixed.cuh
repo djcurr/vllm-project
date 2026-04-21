@@ -84,7 +84,8 @@ __device__ void paged_attention_mixed_kernel_impl(
     const int* __restrict__ block_size_multipliers,
     const int max_num_blocks_per_seq,
     const float* __restrict__ alibi_slopes,
-    const int q_stride, const int kv_block_stride, const int kv_head_stride,
+    const int q_stride, const int kv_block_stride, const int kv_token_stride,
+    const int kv_head_stride,
     const float* k_scale, const float* v_scale, const int tp_rank,
     const int blocksparse_local_blocks, const int blocksparse_vert_stride,
     const int blocksparse_block_size, const int blocksparse_head_sliding_step) {
@@ -105,6 +106,8 @@ __device__ void paged_attention_mixed_kernel_impl(
     return;
   }
   const int logical_block_size = KERNEL_BLOCK_SIZE * block_size_multiplier;
+  const bool is_multiplier_one = block_size_multiplier == 1;
+  const bool is_multiplier_two = block_size_multiplier == 2;
 
   const int num_seq_blocks = DIVIDE_ROUND_UP(seq_len, logical_block_size);
   const int num_blocks_per_partition =
@@ -189,7 +192,17 @@ __device__ void paged_attention_mixed_kernel_impl(
   // Iterate over the key blocks.
   for (int block_idx = start_block_idx + warp_idx; block_idx < end_block_idx;
        block_idx += NUM_WARPS) {
-    
+
+    const int block_token_start = block_idx * logical_block_size;
+    const int block_token_end = MIN(block_token_start + logical_block_size, seq_len);
+    const int tokens_in_block = block_token_end - block_token_start;
+    const int num_sub_blocks = is_multiplier_one
+                                   ? 1
+                                   : is_multiplier_two
+                                         ? (tokens_in_block > KERNEL_BLOCK_SIZE ? 2 : 1)
+                                         : MIN(block_size_multiplier,
+                                               DIVIDE_ROUND_UP(tokens_in_block, KERNEL_BLOCK_SIZE));
+
     if constexpr (IS_BLOCK_SPARSE) {
       const int k_bs_block_id = block_idx * logical_block_size / blocksparse_block_size;
       const bool is_remote =
@@ -197,7 +210,7 @@ __device__ void paged_attention_mixed_kernel_impl(
       const bool is_local =
           (k_bs_block_id > q_bs_block_id - blocksparse_local_blocks);
       if (!is_remote && !is_local) {
-        for (int sub_block = 0; sub_block < block_size_multiplier; ++sub_block) {
+        for (int sub_block = 0; sub_block < num_sub_blocks; ++sub_block) {
           const int token_base_in_block = sub_block * KERNEL_BLOCK_SIZE;
           for (int i = 0; i < NUM_TOKENS_PER_THREAD_GROUP; i++) {
             const int physical_block_offset =
@@ -216,11 +229,14 @@ __device__ void paged_attention_mixed_kernel_impl(
 
     // For mixed block sizes, the logical block maps to block_size_multiplier
     // consecutive physical kernel blocks.
-    const int logical_block_idx = block_idx;
-    const int physical_block_start = logical_block_idx * block_size_multiplier;
+    const int physical_block_start = is_multiplier_one
+                                         ? block_idx
+                                         : is_multiplier_two
+                                               ? (block_idx << 1)
+                                               : block_idx * block_size_multiplier;
 
     // Load all physical sub-blocks that make up this logical block.
-    for (int sub_block = 0; sub_block < block_size_multiplier; ++sub_block) {
+    for (int sub_block = 0; sub_block < num_sub_blocks; ++sub_block) {
       const int token_base_in_block = sub_block * KERNEL_BLOCK_SIZE;
       const int64_t physical_block_number =
           static_cast<int64_t>(block_table[physical_block_start + sub_block]);
@@ -231,7 +247,6 @@ __device__ void paged_attention_mixed_kernel_impl(
         const int token_idx =
             block_idx * logical_block_size + token_base_in_block +
             physical_block_offset;
-        if (token_idx >= end_token_idx) break;
 
         K_vec k_vecs[NUM_VECS_PER_THREAD];
 
@@ -239,17 +254,16 @@ __device__ void paged_attention_mixed_kernel_impl(
         for (int j = 0; j < NUM_VECS_PER_THREAD; j++) {
           const cache_t* k_ptr =
               k_cache + physical_block_number * kv_block_stride +
-              kv_head_idx * kv_head_stride + physical_block_offset * x;
+              physical_block_offset * kv_token_stride +
+              kv_head_idx * kv_head_stride;
           const int vec_idx = thread_group_offset + j * THREAD_GROUP_SIZE;
-          const int offset1 = (vec_idx * VEC_SIZE) / x;
-          const int offset2 = (vec_idx * VEC_SIZE) % x;
 
           if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
             k_vecs[j] = *reinterpret_cast<const K_vec*>(
-                k_ptr + offset1 * KERNEL_BLOCK_SIZE * x + offset2);
+                k_ptr + vec_idx * VEC_SIZE);
           } else {
             Quant_vec k_quant_vec = *reinterpret_cast<const Quant_vec*>(
-                k_ptr + offset1 * KERNEL_BLOCK_SIZE * x + offset2);
+                k_ptr + vec_idx * VEC_SIZE);
             k_vecs[j] = fp8::scaled_convert<K_vec, Quant_vec, KV_DTYPE>(
                 k_quant_vec, *k_scale);
           }
@@ -263,16 +277,30 @@ __device__ void paged_attention_mixed_kernel_impl(
         }
 
         if (thread_group_offset == 0) {
-          logits[token_idx - start_token_idx] = qk;
-          qk_max = MAX(qk_max, qk);
+          const bool mask = token_idx >= end_token_idx;
+          logits[token_idx - start_token_idx] = mask ? 0.f : qk;
+          qk_max = mask ? qk_max : fmaxf(qk_max, qk);
         }
       }
     }
   }
 
+  // Match the original kernel's max reduction before softmax.
+#pragma unroll
+  for (int mask = WARP_SIZE / 2; mask >= THREAD_GROUP_SIZE; mask /= 2) {
+    qk_max = fmaxf(qk_max, VLLM_SHFL_XOR_SYNC(qk_max, mask));
+  }
+  if (lane == 0) {
+    red_smem[warp_idx] = qk_max;
+  }
   __syncthreads();
 
-  qk_max = block_sum_mixed<NUM_WARPS>(red_smem, qk_max);
+  qk_max = lane < NUM_WARPS ? red_smem[lane] : -FLT_MAX;
+#pragma unroll
+  for (int mask = NUM_WARPS / 2; mask >= 1; mask /= 2) {
+    qk_max = fmaxf(qk_max, VLLM_SHFL_XOR_SYNC(qk_max, mask));
+  }
+  qk_max = VLLM_SHFL_SYNC(qk_max, 0);
 
   float exp_sum = 0.f;
   for (int i = thread_idx; i < num_tokens; i += NUM_THREADS) {
@@ -320,6 +348,16 @@ __device__ void paged_attention_mixed_kernel_impl(
   zero(zero_value);
   for (int block_idx = start_block_idx + warp_idx; block_idx < end_block_idx;
        block_idx += NUM_WARPS) {
+    const int block_token_start = block_idx * logical_block_size;
+    const int block_token_end = MIN(block_token_start + logical_block_size, seq_len);
+    const int tokens_in_block = block_token_end - block_token_start;
+    const int num_sub_blocks = is_multiplier_one
+                                   ? 1
+                                   : is_multiplier_two
+                                         ? (tokens_in_block > KERNEL_BLOCK_SIZE ? 2 : 1)
+                                         : MIN(block_size_multiplier,
+                                               DIVIDE_ROUND_UP(tokens_in_block, KERNEL_BLOCK_SIZE));
+
     if constexpr (IS_BLOCK_SPARSE) {
       int v_bs_block_id = block_idx * logical_block_size / blocksparse_block_size;
       if (!((v_bs_block_id + bs_block_offset) % blocksparse_vert_stride == 0) &&
@@ -328,47 +366,51 @@ __device__ void paged_attention_mixed_kernel_impl(
       }
     }
 
-    const int physical_block_start = block_idx * block_size_multiplier;
+    const int physical_block_start = is_multiplier_one
+                                         ? block_idx
+                                         : is_multiplier_two
+                                               ? (block_idx << 1)
+                                               : block_idx * block_size_multiplier;
 
     // Iterate over physical sub-blocks within this logical block.
-    for (int sub_block = 0; sub_block < block_size_multiplier; ++sub_block) {
+    for (int sub_block = 0; sub_block < num_sub_blocks; ++sub_block) {
       const int token_base_in_block = sub_block * KERNEL_BLOCK_SIZE;
       const int token_idx = block_idx * logical_block_size + token_base_in_block;
-      if (token_idx >= end_token_idx) break;
+
+      const int64_t physical_block_number =
+          static_cast<int64_t>(block_table[physical_block_start + sub_block]);
+      const cache_t* v_base = v_cache + physical_block_number * kv_block_stride +
+                           kv_head_idx * kv_head_stride;
 
       const int physical_block_offset = (lane % NUM_V_VECS_PER_ROW) * V_VEC_SIZE;
       const int actual_token_idx = token_idx + physical_block_offset;
-      if (actual_token_idx >= end_token_idx) break;
 
       // Load logits for this group of tokens.
       L_vec logits_vec;
       from_float(logits_vec, *reinterpret_cast<Float_L_vec*>(
                                   logits + actual_token_idx - start_token_idx));
 
-      const int64_t physical_block_number =
-          static_cast<int64_t>(block_table[physical_block_start + sub_block]);
-      const cache_t* v_ptr = v_cache + physical_block_number * kv_block_stride +
-                           kv_head_idx * kv_head_stride;
-
 #pragma unroll
       for (int i = 0; i < NUM_ROWS_PER_THREAD; i++) {
         const int row_idx = lane / NUM_V_VECS_PER_ROW + i * NUM_ROWS_PER_ITER;
         if (row_idx < HEAD_SIZE) {
-          const int offset = row_idx * KERNEL_BLOCK_SIZE + physical_block_offset;
           V_vec v_vec;
+          scalar_t* v_vec_ptr = reinterpret_cast<scalar_t*>(&v_vec);
 
-          if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
-            v_vec = *reinterpret_cast<const V_vec*>(v_ptr + offset);
-          } else {
-            V_quant_vec v_quant_vec =
-                *reinterpret_cast<const V_quant_vec*>(v_ptr + offset);
-            v_vec = fp8::scaled_convert<V_vec, V_quant_vec, KV_DTYPE>(
-                v_quant_vec, *v_scale);
+#pragma unroll
+          for (int j = 0; j < V_VEC_SIZE; j++) {
+            int token_offset = physical_block_offset + j;
+            if constexpr (KV_DTYPE == Fp8KVCacheDataType::kAuto) {
+              v_vec_ptr[j] =
+                  v_base[token_offset * kv_token_stride + row_idx];
+            } else {
+              v_vec_ptr[j] = fp8::scaled_convert<scalar_t, cache_t, KV_DTYPE>(
+                  v_base[token_offset * kv_token_stride + row_idx], *v_scale);
+            }
           }
           
           // Zero out out-of-context tokens in the last block.
           if (block_idx == num_seq_blocks - 1) {
-            scalar_t* v_vec_ptr = reinterpret_cast<scalar_t*>(&v_vec);
 #pragma unroll
             for (int j = 0; j < V_VEC_SIZE; j++) {
               v_vec_ptr[j] = actual_token_idx + j < seq_len ? v_vec_ptr[j] : zero_value;
@@ -381,29 +423,58 @@ __device__ void paged_attention_mixed_kernel_impl(
     }
   }
 
-  // Perform reduction across warps.
-  float* out_accs = logits;
-  for (int i = 0; i < NUM_ROWS_PER_THREAD; i++) {
-    const int row_idx = lane / NUM_V_VECS_PER_ROW + i * NUM_ROWS_PER_ITER;
-    if (row_idx < HEAD_SIZE) {
-      float acc = accs[i];
+  // Match the original kernel's warp-local and cross-warp reduction.
 #pragma unroll
-      for (int mask = WARP_SIZE / 2; mask >= NUM_V_VECS_PER_ROW; mask /= 2) {
-        acc += VLLM_SHFL_XOR_SYNC(acc, mask);
-      }
-      if (lane % NUM_V_VECS_PER_ROW == 0) {
-        out_accs[row_idx] = acc;
-      }
+  for (int i = 0; i < NUM_ROWS_PER_THREAD; i++) {
+    float acc = accs[i];
+#pragma unroll
+    for (int mask = NUM_V_VECS_PER_ROW / 2; mask >= 1; mask /= 2) {
+      acc += VLLM_SHFL_XOR_SYNC(acc, mask);
     }
+    accs[i] = acc;
   }
+
   __syncthreads();
 
-  // Write the output.
-  if (thread_idx < HEAD_SIZE) {
-    float acc = out_accs[thread_idx];
+  float* out_smem = reinterpret_cast<float*>(shared_mem);
+#pragma unroll
+  for (int i = NUM_WARPS; i > 1; i /= 2) {
+    int mid = i / 2;
+    if (warp_idx >= mid && warp_idx < i) {
+      float* dst = &out_smem[(warp_idx - mid) * HEAD_SIZE];
+#pragma unroll
+      for (int j = 0; j < NUM_ROWS_PER_THREAD; j++) {
+        const int row_idx = lane / NUM_V_VECS_PER_ROW + j * NUM_ROWS_PER_ITER;
+        if (row_idx < HEAD_SIZE && lane % NUM_V_VECS_PER_ROW == 0) {
+          dst[row_idx] = accs[j];
+        }
+      }
+    }
+    __syncthreads();
+
+    if (warp_idx < mid) {
+      const float* src = &out_smem[warp_idx * HEAD_SIZE];
+#pragma unroll
+      for (int j = 0; j < NUM_ROWS_PER_THREAD; j++) {
+        const int row_idx = lane / NUM_V_VECS_PER_ROW + j * NUM_ROWS_PER_ITER;
+        if (row_idx < HEAD_SIZE && lane % NUM_V_VECS_PER_ROW == 0) {
+          accs[j] += src[row_idx];
+        }
+      }
+    }
+    __syncthreads();
+  }
+
+  if (warp_idx == 0) {
     scalar_t* out_ptr = out + seq_idx * num_heads * HEAD_SIZE +
                         head_idx * HEAD_SIZE;
-    out_ptr[thread_idx] = static_cast<scalar_t>(acc * inv_sum);
+#pragma unroll
+    for (int i = 0; i < NUM_ROWS_PER_THREAD; i++) {
+      const int row_idx = lane / NUM_V_VECS_PER_ROW + i * NUM_ROWS_PER_ITER;
+      if (row_idx < HEAD_SIZE && lane % NUM_V_VECS_PER_ROW == 0) {
+        from_float(*(out_ptr + row_idx), accs[i]);
+      }
+    }
   }
 }
 
@@ -486,17 +557,19 @@ __global__ void paged_attention_v1_mixed_kernel(
     const int* __restrict__ block_size_multipliers,
     const int max_num_blocks_per_seq,
     const float* __restrict__ alibi_slopes,
-    const int q_stride, const int kv_block_stride, const int kv_head_stride,
-    const float* k_scale, const float* v_scale, const int tp_rank,
-    const int blocksparse_local_blocks, const int blocksparse_vert_stride,
-    const int blocksparse_block_size, const int blocksparse_head_sliding_step) {
+    const int q_stride, const int kv_block_stride, const int kv_token_stride,
+    const int kv_head_stride, const float* k_scale, const float* v_scale,
+    const int tp_rank, const int blocksparse_local_blocks,
+    const int blocksparse_vert_stride, const int blocksparse_block_size,
+    const int blocksparse_head_sliding_step) {
   paged_attention_mixed_kernel_impl<scalar_t, cache_t, HEAD_SIZE, KERNEL_BLOCK_SIZE,
                                      NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE>(
       /*exp_sums=*/nullptr, /*max_logits=*/nullptr, out, q, k_cache, v_cache,
       num_kv_heads, scale, block_tables, seq_lens, block_size_multipliers,
       max_num_blocks_per_seq, alibi_slopes, q_stride, kv_block_stride,
-      kv_head_stride, k_scale, v_scale, tp_rank, blocksparse_local_blocks,
-      blocksparse_vert_stride, blocksparse_block_size, blocksparse_head_sliding_step);
+      kv_token_stride, kv_head_stride, k_scale, v_scale, tp_rank,
+      blocksparse_local_blocks, blocksparse_vert_stride, blocksparse_block_size,
+      blocksparse_head_sliding_step);
 }
 
 // V2 wrapper: grid = (num_heads, num_seqs, max_num_partitions)
@@ -517,17 +590,18 @@ __global__ void paged_attention_v2_mixed_kernel(
     const int* __restrict__ block_size_multipliers,
     const int max_num_blocks_per_seq,
     const float* __restrict__ alibi_slopes,
-    const int q_stride, const int kv_block_stride, const int kv_head_stride,
-    const float* k_scale, const float* v_scale, const int tp_rank,
-    const int blocksparse_local_blocks, const int blocksparse_vert_stride,
-    const int blocksparse_block_size, const int blocksparse_head_sliding_step) {
+    const int q_stride, const int kv_block_stride, const int kv_token_stride,
+    const int kv_head_stride, const float* k_scale, const float* v_scale,
+    const int tp_rank, const int blocksparse_local_blocks,
+    const int blocksparse_vert_stride, const int blocksparse_block_size,
+    const int blocksparse_head_sliding_step) {
   paged_attention_mixed_kernel_impl<scalar_t, cache_t, HEAD_SIZE, KERNEL_BLOCK_SIZE,
                                      NUM_THREADS, KV_DTYPE, IS_BLOCK_SPARSE,
                                      PARTITION_SIZE>(
       exp_sums, max_logits, tmp_out, q, k_cache, v_cache, num_kv_heads, scale,
       block_tables, seq_lens, block_size_multipliers, max_num_blocks_per_seq,
-      alibi_slopes, q_stride, kv_block_stride, kv_head_stride, k_scale, v_scale,
-      tp_rank, blocksparse_local_blocks, blocksparse_vert_stride,
+      alibi_slopes, q_stride, kv_block_stride, kv_token_stride, kv_head_stride,
+      k_scale, v_scale, tp_rank, blocksparse_local_blocks, blocksparse_vert_stride,
       blocksparse_block_size, blocksparse_head_sliding_step);
 }
 
