@@ -469,6 +469,11 @@ class GPUModelRunner(
             "execute_model": {"total_ms": 0.0, "count": 0, "max_ms": 0.0},
             "_model_forward": {"total_ms": 0.0, "count": 0, "max_ms": 0.0},
         }
+        self._promotion_stats = {
+            "count": 0,
+            "kernel_blocks_copied": 0,
+            "logical_tokens_copied": 0,
+        }
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
@@ -504,6 +509,7 @@ class GPUModelRunner(
         # self.model: nn.Module  # Set after load_model
         # Initialize in initialize_kv_cache
         self.kv_caches: list[torch.Tensor] = []
+        self.kv_caches_by_layer: dict[str, torch.Tensor] = {}
         # Initialize in initialize_kv_cache_tensors
         self.cross_layers_kv_cache: torch.Tensor | None = None
         self.cross_layers_attn_backend: type[AttentionBackend] | None = None
@@ -1233,8 +1239,14 @@ class GPUModelRunner(
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
             num_computed_tokens = req_data.num_computed_tokens[i]
+            scheduled_kv_size_class = req_data.kv_size_classes[i]
+            scheduled_kv_block_size = req_data.kv_block_sizes[i]
             new_block_ids = self._normalize_dual_kv_new_block_ids(
-                req_data.new_block_ids[i], req_state.kv_size_class
+                req_data.new_block_ids[i], scheduled_kv_size_class
+            )
+            promotion_source_block_ids = req_data.promotion_source_block_ids[i]
+            promotion_source_kv_size_class = (
+                req_data.promotion_source_kv_size_classes[i]
             )
             resumed_from_preemption = req_id in req_data.resumed_req_ids
             num_output_tokens = req_data.num_output_tokens[i]
@@ -1284,6 +1296,16 @@ class GPUModelRunner(
 
             # Update the cached states.
             req_state.num_computed_tokens = num_computed_tokens
+            if (
+                resumed_from_preemption
+                and promotion_source_block_ids is not None
+                and promotion_source_kv_size_class is not None
+            ):
+                assert new_block_ids is not None
+                src_block_ids = self._normalize_dual_kv_block_ids(
+                    promotion_source_block_ids, promotion_source_kv_size_class
+                )
+                self._copy_promoted_kv_blocks(src_block_ids, new_block_ids)
 
             if not is_last_rank:
                 if not req_data.new_token_ids:
@@ -1329,6 +1351,8 @@ class GPUModelRunner(
                 assert new_block_ids is not None
                 # The request is resumed from preemption.
                 # Replace the existing block IDs with the new ones.
+                req_state.kv_size_class = scheduled_kv_size_class
+                req_state.kv_block_size = scheduled_kv_block_size
                 req_state.block_ids = new_block_ids
 
             if req_index is None:
@@ -6280,21 +6304,6 @@ class GPUModelRunner(
         # Check if attention backend supports PCP&DCP and related features.
         check_attention_cp_compatibility(self.vllm_config)
 
-        cache_config = self.vllm_config.cache_config
-        if cache_config.experimental_dual_kv_blocks:
-            for backend_set in attention_backend_list:
-                for backend in backend_set:
-                    for block_size in (
-                        cache_config.experimental_small_kv_block_size,
-                        cache_config.experimental_large_kv_block_size,
-                    ):
-                        if not backend.supports_block_size(block_size):
-                            raise ValueError(
-                                "experimental_dual_kv_blocks requires all attention "
-                                f"backends to support block size {block_size}, but "
-                                f"{backend.get_name()} does not"
-                            )
-
         for i, attn_backend_map in enumerate(attention_backend_maps):
             self.attn_groups.append(create_attn_groups(attn_backend_map, i))
 
@@ -6650,6 +6659,30 @@ class GPUModelRunner(
         # For unified dual KV runtime, all block IDs are already normalized
         # in the scheduler. Just return them as-is.
         return scheduler_output.new_block_ids_to_zero or []
+
+    def _copy_promoted_kv_blocks(
+        self,
+        src_block_ids: tuple[list[int], ...],
+        dst_block_ids: tuple[list[int], ...],
+    ) -> None:
+        if not self.kv_caches_by_layer:
+            return
+        assert len(src_block_ids) == len(dst_block_ids) == 1, (
+            "Dual-KV promotion currently supports exactly one KV cache group"
+        )
+        copy_kv_blocks(
+            self.kv_caches_by_layer,
+            self.kv_caches_by_layer,
+            src_block_ids[0],
+            dst_block_ids[0],
+            direction="h2d",
+        )
+        self._promotion_stats["count"] += 1
+        self._promotion_stats["kernel_blocks_copied"] += len(src_block_ids[0])
+        if self._kernel_block_sizes:
+            self._promotion_stats["logical_tokens_copied"] += (
+                len(src_block_ids[0]) * self._kernel_block_sizes[0]
+            )
 
     def _get_cascade_common_prefix_blocks(
         self, scheduler_output: "SchedulerOutput"
@@ -7040,6 +7073,7 @@ class GPUModelRunner(
     ) -> None:
         self.kv_cache_config = small_config
         self.kv_cache_config.aux_kv_cache_configs = None
+        self.kv_caches_by_layer = {}
         self.attn_groups = []
         self.kv_caches = []
         self.cross_layers_kv_cache = None
@@ -7103,6 +7137,7 @@ class GPUModelRunner(
             self.kv_caches,
             num_attn_module,
         )
+        self.kv_caches_by_layer = kv_caches
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         """
@@ -7129,6 +7164,7 @@ class GPUModelRunner(
         kv_cache_config: KVCacheConfig,
     ) -> None:
         self.dual_kv_pool_mappings = {}
+        self.kv_caches_by_layer = {}
         self.kv_cache_config = kv_cache_config
         self.attn_groups = []
         self.kv_caches = []
@@ -7146,6 +7182,7 @@ class GPUModelRunner(
         kv_caches = self.initialize_kv_cache_tensors(
             kv_cache_config, kernel_block_sizes
         )
+        self.kv_caches_by_layer = kv_caches
 
         if (
             self.speculative_config
@@ -7310,6 +7347,8 @@ class GPUModelRunner(
             stats["total_ms"] = 0.0
             stats["count"] = 0
             stats["max_ms"] = 0.0
+        for key in self._promotion_stats:
+            self._promotion_stats[key] = 0
 
     def get_execution_timing_stats(self) -> dict[str, dict[str, float | int]]:
         result: dict[str, dict[str, float | int]] = {}
@@ -7322,6 +7361,9 @@ class GPUModelRunner(
                 "max_ms": stats["max_ms"],
             }
         return result
+
+    def get_promotion_stats(self) -> dict[str, int]:
+        return dict(self._promotion_stats)
 
     @contextmanager
     def timed_encoder_operation(

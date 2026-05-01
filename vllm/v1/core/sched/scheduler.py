@@ -241,6 +241,7 @@ class Scheduler(SchedulerInterface):
             "default": self.kv_cache_manager
         }
         self.active_kv_size_class = "default"
+        self._pending_promotion_frees: list[tuple[Request, str]] = []
         if self.experimental_dual_kv_blocks:
             aux_configs = kv_cache_config.aux_kv_cache_configs or {}
             large_config = aux_configs.get("large")
@@ -335,6 +336,49 @@ class Scheduler(SchedulerInterface):
     def get_active_kv_cache_manager(self) -> KVCacheManager:
         return self.kv_cache_managers[self.active_kv_size_class]
 
+    def _get_effective_large_threshold(self) -> int:
+        if not self.experimental_dual_kv_blocks:
+            return self.cache_config.block_size
+        return max(
+            self.cache_config.experimental_dual_kv_threshold_tokens,
+            self.cache_config.experimental_large_kv_block_size * 32,
+        )
+
+    def _should_promote_request(self, request: Request) -> bool:
+        if not self.experimental_dual_kv_blocks:
+            return False
+        if request.kv_size_class != "small":
+            return False
+        if request.promotion_source_block_ids is not None:
+            return False
+        return request.num_computed_tokens >= self._get_effective_large_threshold()
+
+    def _free_pending_promotion_blocks(self) -> None:
+        if not self._pending_promotion_frees:
+            return
+        pending = self._pending_promotion_frees
+        self._pending_promotion_frees = []
+        for request, old_kv_size_class in pending:
+            self.kv_cache_managers[old_kv_size_class].free(request)
+
+    def _promote_request(self, request: Request, timestamp: float) -> None:
+        assert request.status == RequestStatus.RUNNING
+        assert request.kv_size_class == "small"
+        self.prev_step_scheduled_req_ids.discard(request.request_id)
+        old_block_ids = self.kv_cache_managers["small"].get_block_ids(
+            request.request_id
+        )
+        request.promotion_source_kv_size_class = "small"
+        request.promotion_source_block_ids = old_block_ids
+        request.kv_size_class = "large"
+        request.kv_block_size = self.cache_config.experimental_large_kv_block_size
+        request.status = RequestStatus.PREEMPTED
+        if request.spec_token_ids:
+            request.spec_token_ids = []
+        if self.log_stats:
+            request.record_event(EngineCoreEventType.PREEMPTED, timestamp)
+        self.waiting.prepend_request(request)
+
     def _select_step_kv_size_class(self) -> str:
         if not self.experimental_dual_kv_blocks:
             return "default"
@@ -427,6 +471,7 @@ class Scheduler(SchedulerInterface):
 
         # For logging.
         scheduled_timestamp = time.monotonic()
+        self._free_pending_promotion_blocks()
 
         # With mixed kernel support, we no longer need to select a single
         # KV size class per step. Both small and large requests can be
@@ -438,6 +483,10 @@ class Scheduler(SchedulerInterface):
         req_index = 0
         while req_index < len(self.running) and token_budget > 0:
             request = self.running[req_index]
+            if self._should_promote_request(request):
+                self.running.pop(req_index)
+                self._promote_request(request, scheduled_timestamp)
+                continue
             request_kv_cache_manager = self.get_kv_cache_manager_for_request(request)
 
             if (
@@ -964,6 +1013,14 @@ class Scheduler(SchedulerInterface):
                 req_to_new_blocks,
             )
 
+        for req in scheduled_resumed_reqs:
+            if req.promotion_source_kv_size_class is not None:
+                self._pending_promotion_frees.append(
+                    (req, req.promotion_source_kv_size_class)
+                )
+                req.promotion_source_kv_size_class = None
+                req.promotion_source_block_ids = None
+
         # Record the request ids that were scheduled in this step.
         self.prev_step_scheduled_req_ids.clear()
         self.prev_step_scheduled_req_ids.update(num_scheduled_tokens.keys())
@@ -1127,10 +1184,13 @@ class Scheduler(SchedulerInterface):
         req_ids: list[str] = []
         new_token_ids: list[list[int]] = []
         new_block_ids: list[tuple[list[int], ...] | None] = []
+        promotion_source_block_ids: list[tuple[list[int], ...] | None] = []
+        promotion_source_kv_size_classes: list[str | None] = []
         all_token_ids: dict[str, list[int]] = {}
         num_computed_tokens: list[int] = []
         num_output_tokens: list[int] = []
         kv_size_classes: list[str] = []
+        kv_block_sizes: list[int | None] = []
         resumed_req_ids = set()
 
         num_running_reqs = len(running_reqs)
@@ -1162,11 +1222,16 @@ class Scheduler(SchedulerInterface):
             new_block_ids.append(
                 req_to_new_blocks[req_id].get_block_ids(allow_none=True)
             )
+            promotion_source_block_ids.append(req.promotion_source_block_ids)
+            promotion_source_kv_size_classes.append(
+                req.promotion_source_kv_size_class
+            )
             num_computed_tokens.append(req.num_computed_tokens)
             num_output_tokens.append(
                 req.num_output_tokens + req.num_output_placeholders
             )
             kv_size_classes.append(self.get_request_kv_size_class(req))
+            kv_block_sizes.append(req.kv_block_size)
 
         return CachedRequestData(
             req_ids=req_ids,
@@ -1176,7 +1241,10 @@ class Scheduler(SchedulerInterface):
             new_block_ids=new_block_ids,
             num_computed_tokens=num_computed_tokens,
             num_output_tokens=num_output_tokens,
+            promotion_source_block_ids=promotion_source_block_ids,
+            promotion_source_kv_size_classes=promotion_source_kv_size_classes,
             kv_size_classes=kv_size_classes,
+            kv_block_sizes=kv_block_sizes,
         )
 
     def _try_schedule_encoder_inputs(
@@ -1910,7 +1978,18 @@ class Scheduler(SchedulerInterface):
 
     def _free_blocks(self, request: Request):
         assert request.is_finished()
+        self._pending_promotion_frees = [
+            (pending_request, old_kv_size_class)
+            for pending_request, old_kv_size_class in self._pending_promotion_frees
+            if pending_request is not request
+        ]
         self.get_kv_cache_manager_for_request(request).free(request)
+        if request.promotion_source_kv_size_class is not None:
+            self.kv_cache_managers[request.promotion_source_kv_size_class].free(
+                request
+            )
+            request.promotion_source_kv_size_class = None
+            request.promotion_source_block_ids = None
         del self.requests[request.request_id]
 
     @property

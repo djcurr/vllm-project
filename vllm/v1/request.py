@@ -182,6 +182,11 @@ class Request:
         # Experimental dual-size KV allocation metadata.
         self.kv_size_class: KVSizeClass = "default"
         self.kv_block_size: int | None = None
+        # Dynamic promotion metadata for dual-KV mode. When set, the request
+        # still has valid KV contents in the source class until the worker
+        # copies them into the destination class on resume.
+        self.promotion_source_kv_size_class: KVSizeClass | None = None
+        self.promotion_source_block_ids: tuple[list[int], ...] | None = None
 
     @classmethod
     def from_engine_core_request(

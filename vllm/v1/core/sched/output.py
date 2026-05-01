@@ -127,7 +127,14 @@ class CachedRequestData:
     new_block_ids: list[tuple[list[int], ...] | None]
     num_computed_tokens: list[int]
     num_output_tokens: list[int]
+    promotion_source_block_ids: list[tuple[list[int], ...] | None] = field(
+        default_factory=list
+    )
+    promotion_source_kv_size_classes: list[KVSizeClass | None] = field(
+        default_factory=list
+    )
     kv_size_classes: list[KVSizeClass] = field(default_factory=list)
+    kv_block_sizes: list[int | None] = field(default_factory=list)
 
     # Version of dataclass repr with token IDs obfuscated.
     def anon_repr(self) -> str:
@@ -142,6 +149,7 @@ class CachedRequestData:
             f"new_token_ids_lens={new_token_ids_lens},"
             f"all_token_ids_lens={all_token_ids_lens},"
             f"new_block_ids={self.new_block_ids},"
+            f"promotion_source_block_ids={self.promotion_source_block_ids},"
             f"num_computed_tokens={self.num_computed_tokens},"
             f"num_output_tokens={self.num_output_tokens}"
             f"kv_size_classes={self.kv_size_classes}"
@@ -177,9 +185,12 @@ class CachedRequestData:
             new_token_ids=[],
             all_token_ids={},
             new_block_ids=[],
+            promotion_source_block_ids=[],
+            promotion_source_kv_size_classes=[],
             num_computed_tokens=[],
             num_output_tokens=[],
             kv_size_classes=[],
+            kv_block_sizes=[],
         )
 
 

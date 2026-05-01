@@ -220,6 +220,18 @@ def _get_execution_timing_stats(llm):
     return None
 
 
+def _get_promotion_stats(llm):
+    try:
+        engine = llm.llm_engine
+        if hasattr(engine, "collective_rpc"):
+            results = engine.collective_rpc("get_promotion_stats")
+            if results:
+                return results[0]
+    except Exception:
+        return None
+    return None
+
+
 def _print_kv_memory_stats(name: str, stats, suffix: str = "") -> None:
     if stats is None:
         print("  [KV stats] unavailable")
@@ -293,8 +305,8 @@ def _summarize_admission_policy(workload: List[Request], engine_args: dict) -> d
     return by_class
 
 
-def _print_admission_summary(name: str, summary: dict) -> None:
-    print(f"  Admission Summary ({name}):")
+def _print_initial_admission_summary(name: str, summary: dict) -> None:
+    print(f"  Initial Admission Summary ({name}):")
     for cls, stats in summary.items():
         count = stats["count"]
         avg_expected_total = stats["expected_total_sum"] / count
@@ -303,6 +315,16 @@ def _print_admission_summary(name: str, summary: dict) -> None:
             f"expected_total avg={avg_expected_total:.1f} "
             f"min={stats['min_expected_total']} max={stats['max_expected_total']}"
         )
+
+
+def _print_promotion_stats(name: str, stats) -> None:
+    if not stats:
+        print(f"  Runtime Promotion Stats ({name}): unavailable")
+        return
+    print(f"  Runtime Promotion Stats ({name}):")
+    print(f"    Promotions:            {stats['count']}")
+    print(f"    Kernel blocks copied:  {stats['kernel_blocks_copied']}")
+    print(f"    Tokens copied:         {stats['logical_tokens_copied']}")
 
 
 def _print_step_metrics(name: str, metrics: dict) -> None:
@@ -383,7 +405,7 @@ def benchmark(name: str, workload: List[Request], model: str, engine_args: dict,
         for r in workload
     ]
     admission_summary = _summarize_admission_policy(workload, engine_args)
-    _print_admission_summary(name, admission_summary)
+    _print_initial_admission_summary(name, admission_summary)
 
     # Warmup
     print("Warming up...")
@@ -410,6 +432,8 @@ def benchmark(name: str, workload: List[Request], model: str, engine_args: dict,
     _print_step_metrics(name, step_metrics)
     execution_timing_stats = _get_execution_timing_stats(llm)
     _print_execution_timing_stats(name, execution_timing_stats)
+    promotion_stats = _get_promotion_stats(llm)
+    _print_promotion_stats(name, promotion_stats)
     
     # Calculate metrics
     total_output_tokens = sum(len(o.outputs[0].token_ids) for o in outputs)
@@ -425,6 +449,7 @@ def benchmark(name: str, workload: List[Request], model: str, engine_args: dict,
         "admission_summary": admission_summary,
         "peak_kv_stats": peak_kv_stats,
         "execution_timing_stats": execution_timing_stats,
+        "promotion_stats": promotion_stats,
         "step_metrics": {
             "total_steps": step_metrics["total_steps"],
             "output_steps": step_metrics["output_steps"],

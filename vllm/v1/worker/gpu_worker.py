@@ -731,6 +731,9 @@ class Worker(WorkerBase):
         result.update(self.model_runner.get_execution_timing_stats())
         return result
 
+    def get_promotion_stats(self) -> dict[str, int]:
+        return self.model_runner.get_promotion_stats()
+
     def get_kv_memory_stats(self) -> dict[str, Any]:
         kernel_block_size = (
             self.model_runner._kernel_block_sizes[0]
