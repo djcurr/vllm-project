@@ -3,8 +3,8 @@
     "config": "Fixed-16",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 4.6,
-    "throughput_tokens_per_sec": 5564.3,
+    "elapsed_seconds": 5.26,
+    "throughput_tokens_per_sec": 4864.45,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -17,23 +17,23 @@
     "peak_kv_stats": {
       "kernel_block_size": 16,
       "total_allocated": 38400,
-      "total_actual": 36852,
-      "total_waste": 1548,
+      "total_actual": 36892,
+      "total_waste": 1508,
       "by_class": {
         "default": {
           "count": 100,
           "allocated": 38400,
-          "actual": 36852,
-          "waste": 1548
+          "actual": 36892,
+          "waste": 1508
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 4078.458000905812,
-        "count": 260,
-        "avg_ms": 15.686376926560815,
-        "max_ms": 114.81522209942341
+        "total_ms": 4611.012321722228,
+        "count": 261,
+        "avg_ms": 17.666713876330377,
+        "max_ms": 187.47330899350345
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -42,415 +42,30 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 3682.6187656261027,
-        "count": 258,
-        "avg_ms": 14.273716145837607,
-        "max_ms": 111.61561170592904
+        "total_ms": 4140.45496028848,
+        "count": 259,
+        "avg_ms": 15.98631258798641,
+        "max_ms": 178.3277480280958
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 258,
-      "output_steps": 258,
-      "avg_step_ms": 1.78,
-      "p50_step_ms": 1.44,
-      "p95_step_ms": 1.5,
-      "max_step_ms": 103.52,
-      "first_output_s": 0.1035
+      "total_steps": 259,
+      "output_steps": 259,
+      "avg_step_ms": 2.49,
+      "p50_step_ms": 2.39,
+      "p95_step_ms": 2.48,
+      "max_step_ms": 18.65,
+      "first_output_s": 0.0187
     },
     "workload": {
       "num_requests": 100,
       "short_ratio": null,
       "input_len": 128,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Fixed-32",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 4.61,
-    "throughput_tokens_per_sec": 5551.09,
-    "admission_summary": {
-      "default": {
-        "count": 100,
-        "expected_total_sum": 38400,
-        "min_expected_total": 384,
-        "max_expected_total": 384,
-        "block_size": 32
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 32,
-      "total_allocated": 38400,
-      "total_actual": 35262,
-      "total_waste": 3138,
-      "by_class": {
-        "default": {
-          "count": 100,
-          "allocated": 38400,
-          "actual": 35262,
-          "waste": 3138
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 4091.4739170111716,
-        "count": 260,
-        "avg_ms": 15.73643814235066,
-        "max_ms": 138.66223813965917
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 3758.5518057458103,
-        "count": 258,
-        "avg_ms": 14.568030254828722,
-        "max_ms": 134.0648392215371
-      }
-    },
-    "step_metrics": {
-      "total_steps": 258,
-      "output_steps": 258,
-      "avg_step_ms": 1.78,
-      "p50_step_ms": 1.44,
-      "p95_step_ms": 1.48,
-      "max_step_ms": 131.09,
-      "first_output_s": 0.1311
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 128,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Dual-Size",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 4.33,
-    "throughput_tokens_per_sec": 5918.32,
-    "admission_summary": {
-      "small": {
-        "count": 100,
-        "expected_total_sum": 38400,
-        "min_expected_total": 384,
-        "max_expected_total": 384,
-        "block_size": 16
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 16,
-      "total_allocated": 38400,
-      "total_actual": 36853,
-      "total_waste": 1547,
-      "by_class": {
-        "small": {
-          "count": 100,
-          "allocated": 38400,
-          "actual": 36853,
-          "waste": 1547
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 3807.13993916288,
-        "count": 260,
-        "avg_ms": 14.642845919857232,
-        "max_ms": 117.82158492133021
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 3395.9797848947346,
-        "count": 258,
-        "avg_ms": 13.162712344553235,
-        "max_ms": 114.38739486038685
-      }
-    },
-    "step_metrics": {
-      "total_steps": 258,
-      "output_steps": 258,
-      "avg_step_ms": 1.77,
-      "p50_step_ms": 1.37,
-      "p95_step_ms": 1.41,
-      "max_step_ms": 106.13,
-      "first_output_s": 0.1061
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 128,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Fixed-16",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 4.87,
-    "throughput_tokens_per_sec": 5253.33,
-    "admission_summary": {
-      "default": {
-        "count": 100,
-        "expected_total_sum": 51200,
-        "min_expected_total": 512,
-        "max_expected_total": 512,
-        "block_size": 16
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 16,
-      "total_allocated": 51200,
-      "total_actual": 49793,
-      "total_waste": 1407,
-      "by_class": {
-        "default": {
-          "count": 100,
-          "allocated": 51200,
-          "actual": 49793,
-          "waste": 1407
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 4337.477308232337,
-        "count": 262,
-        "avg_ms": 16.555256901650143,
-        "max_ms": 152.75281807407737
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 3937.1177735738456,
-        "count": 260,
-        "avg_ms": 15.142760667591714,
-        "max_ms": 150.19745845347643
-      }
-    },
-    "step_metrics": {
-      "total_steps": 260,
-      "output_steps": 260,
-      "avg_step_ms": 1.79,
-      "p50_step_ms": 1.47,
-      "p95_step_ms": 1.56,
-      "max_step_ms": 117.14,
-      "first_output_s": 0.1171
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 256,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Fixed-32",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 4.86,
-    "throughput_tokens_per_sec": 5263.83,
-    "admission_summary": {
-      "default": {
-        "count": 100,
-        "expected_total_sum": 51200,
-        "min_expected_total": 512,
-        "max_expected_total": 512,
-        "block_size": 32
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 32,
-      "total_allocated": 51200,
-      "total_actual": 48188,
-      "total_waste": 3012,
-      "by_class": {
-        "default": {
-          "count": 100,
-          "allocated": 51200,
-          "actual": 48188,
-          "waste": 3012
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 4328.431641682982,
-        "count": 262,
-        "avg_ms": 16.520731456805276,
-        "max_ms": 152.59531186893582
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 3913.2015486247838,
-        "count": 260,
-        "avg_ms": 15.050775187018399,
-        "max_ms": 150.13723215088248
-      }
-    },
-    "step_metrics": {
-      "total_steps": 260,
-      "output_steps": 260,
-      "avg_step_ms": 1.62,
-      "p50_step_ms": 1.45,
-      "p95_step_ms": 1.5,
-      "max_step_ms": 102.08,
-      "first_output_s": 0.1021
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 256,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Dual-Size",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 4.82,
-    "throughput_tokens_per_sec": 5312.29,
-    "admission_summary": {
-      "small": {
-        "count": 100,
-        "expected_total_sum": 51200,
-        "min_expected_total": 512,
-        "max_expected_total": 512,
-        "block_size": 16
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 16,
-      "total_allocated": 51200,
-      "total_actual": 49793,
-      "total_waste": 1407,
-      "by_class": {
-        "small": {
-          "count": 100,
-          "allocated": 51200,
-          "actual": 49793,
-          "waste": 1407
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 4253.638992086053,
-        "count": 262,
-        "avg_ms": 16.23526332857272,
-        "max_ms": 153.6782756447792
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 3808.8958524167538,
-        "count": 260,
-        "avg_ms": 14.64959943237213,
-        "max_ms": 149.6419357135892
-      }
-    },
-    "step_metrics": {
-      "total_steps": 260,
-      "output_steps": 260,
-      "avg_step_ms": 1.82,
-      "p50_step_ms": 1.43,
-      "p95_step_ms": 1.51,
-      "max_step_ms": 116.61,
-      "first_output_s": 0.1166
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 256,
-      "output_len": 256
-    }
-  },
-  {
-    "config": "Fixed-16",
-    "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 5.38,
-    "throughput_tokens_per_sec": 4758.54,
-    "admission_summary": {
-      "default": {
-        "count": 100,
-        "expected_total_sum": 76800,
-        "min_expected_total": 768,
-        "max_expected_total": 768,
-        "block_size": 16
-      }
-    },
-    "peak_kv_stats": {
-      "kernel_block_size": 16,
-      "total_allocated": 76800,
-      "total_actual": 75537,
-      "total_waste": 1263,
-      "by_class": {
-        "default": {
-          "count": 100,
-          "allocated": 76800,
-          "actual": 75537,
-          "waste": 1263
-        }
-      }
-    },
-    "execution_timing_stats": {
-      "worker_execute_model": {
-        "total_ms": 4858.022255357355,
-        "count": 265,
-        "avg_ms": 18.332159454178697,
-        "max_ms": 161.80222388356924
-      },
-      "execute_model": {
-        "total_ms": 0.0,
-        "count": 0,
-        "avg_ms": 0.0,
-        "max_ms": 0.0
-      },
-      "_model_forward": {
-        "total_ms": 4485.478128772229,
-        "count": 263,
-        "avg_ms": 17.05504991928604,
-        "max_ms": 159.50108272954822
-      }
-    },
-    "step_metrics": {
-      "total_steps": 263,
-      "output_steps": 263,
-      "avg_step_ms": 1.82,
-      "p50_step_ms": 1.47,
-      "p95_step_ms": 1.53,
-      "max_step_ms": 83.75,
-      "first_output_s": 0.0838
-    },
-    "workload": {
-      "num_requests": 100,
-      "short_ratio": null,
-      "input_len": 512,
       "output_len": 256
     }
   },
@@ -459,7 +74,427 @@
     "num_requests": 100,
     "total_output_tokens": 25600,
     "elapsed_seconds": 5.33,
-    "throughput_tokens_per_sec": 4802.93,
+    "throughput_tokens_per_sec": 4800.77,
+    "admission_summary": {
+      "default": {
+        "count": 100,
+        "expected_total_sum": 38400,
+        "min_expected_total": 384,
+        "max_expected_total": 384,
+        "block_size": 32
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 32,
+      "total_allocated": 38400,
+      "total_actual": 35292,
+      "total_waste": 3108,
+      "by_class": {
+        "default": {
+          "count": 100,
+          "allocated": 38400,
+          "actual": 35292,
+          "waste": 3108
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 4665.508953214157,
+        "count": 261,
+        "avg_ms": 17.875513230705582,
+        "max_ms": 176.49676598375663
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 4093.4030343196355,
+        "count": 259,
+        "avg_ms": 15.804644920153033,
+        "max_ms": 169.0271200495772
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 259,
+      "output_steps": 259,
+      "avg_step_ms": 2.39,
+      "p50_step_ms": 2.37,
+      "p95_step_ms": 2.43,
+      "max_step_ms": 9.44,
+      "first_output_s": 0.0001
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 128,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Dual-Size",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 4.95,
+    "throughput_tokens_per_sec": 5170.79,
+    "admission_summary": {
+      "small": {
+        "count": 100,
+        "expected_total_sum": 38400,
+        "min_expected_total": 384,
+        "max_expected_total": 384,
+        "block_size": 16
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 16,
+      "total_allocated": 38400,
+      "total_actual": 36892,
+      "total_waste": 1508,
+      "by_class": {
+        "small": {
+          "count": 100,
+          "allocated": 38400,
+          "actual": 36892,
+          "waste": 1508
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 4275.867600750644,
+        "count": 261,
+        "avg_ms": 16.38263448563465,
+        "max_ms": 183.83987003471702
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 3724.1756610455923,
+        "count": 259,
+        "avg_ms": 14.379056606353638,
+        "max_ms": 177.20888496842235
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 259,
+      "output_steps": 259,
+      "avg_step_ms": 2.31,
+      "p50_step_ms": 2.28,
+      "p95_step_ms": 2.37,
+      "max_step_ms": 10.52,
+      "first_output_s": 0.0001
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 128,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Fixed-16",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 5.73,
+    "throughput_tokens_per_sec": 4465.9,
+    "admission_summary": {
+      "default": {
+        "count": 100,
+        "expected_total_sum": 51200,
+        "min_expected_total": 512,
+        "max_expected_total": 512,
+        "block_size": 16
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 16,
+      "total_allocated": 51200,
+      "total_actual": 49725,
+      "total_waste": 1475,
+      "by_class": {
+        "default": {
+          "count": 100,
+          "allocated": 51200,
+          "actual": 49725,
+          "waste": 1475
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 5048.86914009694,
+        "count": 262,
+        "avg_ms": 19.27049290113336,
+        "max_ms": 188.11455700779334
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 4479.995245288592,
+        "count": 260,
+        "avg_ms": 17.23075094341766,
+        "max_ms": 182.81884799944237
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 260,
+      "output_steps": 260,
+      "avg_step_ms": 2.36,
+      "p50_step_ms": 2.3,
+      "p95_step_ms": 2.39,
+      "max_step_ms": 10.93,
+      "first_output_s": 0.0001
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 256,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Fixed-32",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 5.67,
+    "throughput_tokens_per_sec": 4512.75,
+    "admission_summary": {
+      "default": {
+        "count": 100,
+        "expected_total_sum": 51200,
+        "min_expected_total": 512,
+        "max_expected_total": 512,
+        "block_size": 32
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 32,
+      "total_allocated": 51200,
+      "total_actual": 48122,
+      "total_waste": 3078,
+      "by_class": {
+        "default": {
+          "count": 100,
+          "allocated": 51200,
+          "actual": 48122,
+          "waste": 3078
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 4986.477960192133,
+        "count": 262,
+        "avg_ms": 19.03235862668753,
+        "max_ms": 177.89068899583071
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 4398.666645458434,
+        "count": 260,
+        "avg_ms": 16.91794863637859,
+        "max_ms": 171.0957819595933
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 260,
+      "output_steps": 260,
+      "avg_step_ms": 2.38,
+      "p50_step_ms": 2.3,
+      "p95_step_ms": 2.39,
+      "max_step_ms": 10.78,
+      "first_output_s": 0.0002
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 256,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Dual-Size",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 5.41,
+    "throughput_tokens_per_sec": 4731.27,
+    "admission_summary": {
+      "small": {
+        "count": 100,
+        "expected_total_sum": 51200,
+        "min_expected_total": 512,
+        "max_expected_total": 512,
+        "block_size": 16
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 16,
+      "total_allocated": 51200,
+      "total_actual": 49719,
+      "total_waste": 1481,
+      "by_class": {
+        "small": {
+          "count": 100,
+          "allocated": 51200,
+          "actual": 49719,
+          "waste": 1481
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 4713.396500330418,
+        "count": 262,
+        "avg_ms": 17.990062978360374,
+        "max_ms": 180.8024130295962
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 4113.21426986251,
+        "count": 260,
+        "avg_ms": 15.820054884086577,
+        "max_ms": 175.5919309798628
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 260,
+      "output_steps": 260,
+      "avg_step_ms": 2.37,
+      "p50_step_ms": 2.31,
+      "p95_step_ms": 2.38,
+      "max_step_ms": 11.21,
+      "first_output_s": 0.0002
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 256,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Fixed-16",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 6.26,
+    "throughput_tokens_per_sec": 4088.99,
+    "admission_summary": {
+      "default": {
+        "count": 100,
+        "expected_total_sum": 76800,
+        "min_expected_total": 768,
+        "max_expected_total": 768,
+        "block_size": 16
+      }
+    },
+    "peak_kv_stats": {
+      "kernel_block_size": 16,
+      "total_allocated": 76800,
+      "total_actual": 75472,
+      "total_waste": 1328,
+      "by_class": {
+        "default": {
+          "count": 100,
+          "allocated": 76800,
+          "actual": 75472,
+          "waste": 1328
+        }
+      }
+    },
+    "execution_timing_stats": {
+      "worker_execute_model": {
+        "total_ms": 5568.7260429840535,
+        "count": 265,
+        "avg_ms": 21.014060539562465,
+        "max_ms": 198.0392729747109
+      },
+      "execute_model": {
+        "total_ms": 0.0,
+        "count": 0,
+        "avg_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "_model_forward": {
+        "total_ms": 4996.896925207693,
+        "count": 263,
+        "avg_ms": 18.999608080637618,
+        "max_ms": 188.5148499859497
+      }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
+    "step_metrics": {
+      "total_steps": 263,
+      "output_steps": 263,
+      "avg_step_ms": 2.51,
+      "p50_step_ms": 2.43,
+      "p95_step_ms": 2.52,
+      "max_step_ms": 10.76,
+      "first_output_s": 0.0003
+    },
+    "workload": {
+      "num_requests": 100,
+      "short_ratio": null,
+      "input_len": 512,
+      "output_len": 256
+    }
+  },
+  {
+    "config": "Fixed-32",
+    "num_requests": 100,
+    "total_output_tokens": 25600,
+    "elapsed_seconds": 6.35,
+    "throughput_tokens_per_sec": 4032.19,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -472,23 +507,23 @@
     "peak_kv_stats": {
       "kernel_block_size": 32,
       "total_allocated": 76800,
-      "total_actual": 73937,
-      "total_waste": 2863,
+      "total_actual": 73872,
+      "total_waste": 2928,
       "by_class": {
         "default": {
           "count": 100,
           "allocated": 76800,
-          "actual": 73937,
-          "waste": 2863
+          "actual": 73872,
+          "waste": 2928
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 4812.546163331717,
+        "total_ms": 5646.154808811843,
         "count": 265,
-        "avg_ms": 18.16055155974233,
-        "max_ms": 161.10229725018144
+        "avg_ms": 21.306244561554127,
+        "max_ms": 185.1516190217808
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -497,20 +532,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 4471.686925273389,
+        "total_ms": 5068.966782710049,
         "count": 263,
-        "avg_ms": 17.00261188316878,
-        "max_ms": 159.16686737909913
+        "avg_ms": 19.27363795707243,
+        "max_ms": 182.1452309959568
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 263,
       "output_steps": 263,
-      "avg_step_ms": 1.84,
-      "p50_step_ms": 1.47,
-      "p95_step_ms": 1.51,
-      "max_step_ms": 82.47,
-      "first_output_s": 0.0825
+      "avg_step_ms": 2.55,
+      "p50_step_ms": 2.44,
+      "p95_step_ms": 2.49,
+      "max_step_ms": 10.72,
+      "first_output_s": 0.0002
     },
     "workload": {
       "num_requests": 100,
@@ -523,8 +563,8 @@
     "config": "Dual-Size",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 5.13,
-    "throughput_tokens_per_sec": 4986.39,
+    "elapsed_seconds": 6.05,
+    "throughput_tokens_per_sec": 4231.95,
     "admission_summary": {
       "small": {
         "count": 100,
@@ -550,10 +590,10 @@
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 4606.292300391942,
+        "total_ms": 5337.77232572902,
         "count": 265,
-        "avg_ms": 17.38223509581865,
-        "max_ms": 160.9369097277522
+        "avg_ms": 20.142537078222716,
+        "max_ms": 187.56823701551184
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -562,20 +602,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 4165.218519512564,
+        "total_ms": 4696.893977059517,
         "count": 263,
-        "avg_ms": 15.83733277381203,
-        "max_ms": 156.18554782122374
+        "avg_ms": 17.858912460302346,
+        "max_ms": 183.82230802671984
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 263,
       "output_steps": 263,
-      "avg_step_ms": 1.78,
-      "p50_step_ms": 1.41,
-      "p95_step_ms": 1.44,
-      "max_step_ms": 85.14,
-      "first_output_s": 0.0851
+      "avg_step_ms": 2.86,
+      "p50_step_ms": 2.38,
+      "p95_step_ms": 2.58,
+      "max_step_ms": 98.26,
+      "first_output_s": 0.0983
     },
     "workload": {
       "num_requests": 100,
@@ -588,8 +633,8 @@
     "config": "Fixed-16",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 6.46,
-    "throughput_tokens_per_sec": 3965.84,
+    "elapsed_seconds": 7.57,
+    "throughput_tokens_per_sec": 3382.9,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -602,23 +647,23 @@
     "peak_kv_stats": {
       "kernel_block_size": 16,
       "total_allocated": 128000,
-      "total_actual": 127025,
-      "total_waste": 975,
+      "total_actual": 126990,
+      "total_waste": 1010,
       "by_class": {
         "default": {
           "count": 100,
           "allocated": 128000,
-          "actual": 127025,
-          "waste": 975
+          "actual": 126990,
+          "waste": 1010
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 5910.464335698634,
+        "total_ms": 6862.640255887527,
         "count": 271,
-        "avg_ms": 21.809831497042932,
-        "max_ms": 174.48946088552475
+        "avg_ms": 25.323395778182757,
+        "max_ms": 203.24358402285725
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -627,20 +672,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 5483.858397230506,
+        "total_ms": 6256.166023085825,
         "count": 269,
-        "avg_ms": 20.386090696024187,
-        "max_ms": 172.4150599911809
+        "avg_ms": 23.257122762400837,
+        "max_ms": 200.3546729683876
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 269,
       "output_steps": 269,
-      "avg_step_ms": 1.71,
-      "p50_step_ms": 1.54,
-      "p95_step_ms": 2.19,
-      "max_step_ms": 21.72,
-      "first_output_s": 0.0217
+      "avg_step_ms": 2.66,
+      "p50_step_ms": 2.39,
+      "p95_step_ms": 2.49,
+      "max_step_ms": 10.5,
+      "first_output_s": 0.0005
     },
     "workload": {
       "num_requests": 100,
@@ -653,8 +703,8 @@
     "config": "Fixed-32",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 6.57,
-    "throughput_tokens_per_sec": 3896.76,
+    "elapsed_seconds": 7.47,
+    "throughput_tokens_per_sec": 3425.18,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -667,23 +717,23 @@
     "peak_kv_stats": {
       "kernel_block_size": 32,
       "total_allocated": 128000,
-      "total_actual": 125425,
-      "total_waste": 2575,
+      "total_actual": 125390,
+      "total_waste": 2610,
       "by_class": {
         "default": {
           "count": 100,
           "allocated": 128000,
-          "actual": 125425,
-          "waste": 2575
+          "actual": 125390,
+          "waste": 2610
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 6014.615738764405,
+        "total_ms": 6785.105817718431,
         "count": 271,
-        "avg_ms": 22.194154017580832,
-        "max_ms": 175.20776391029358
+        "avg_ms": 25.037290840289415,
+        "max_ms": 203.04173103068024
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -692,20 +742,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 5629.747156985104,
+        "total_ms": 6195.313474105205,
         "count": 269,
-        "avg_ms": 20.92842809288143,
-        "max_ms": 173.27045323327184
+        "avg_ms": 23.03090510819779,
+        "max_ms": 200.3874329966493
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 269,
       "output_steps": 269,
-      "avg_step_ms": 1.6,
-      "p50_step_ms": 1.47,
-      "p95_step_ms": 2.63,
-      "max_step_ms": 18.7,
-      "first_output_s": 0.0187
+      "avg_step_ms": 2.64,
+      "p50_step_ms": 2.39,
+      "p95_step_ms": 2.49,
+      "max_step_ms": 10.8,
+      "first_output_s": 0.0005
     },
     "workload": {
       "num_requests": 100,
@@ -718,8 +773,8 @@
     "config": "Dual-Size",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 6.84,
-    "throughput_tokens_per_sec": 3742.02,
+    "elapsed_seconds": 7.8,
+    "throughput_tokens_per_sec": 3280.11,
     "admission_summary": {
       "large": {
         "count": 100,
@@ -732,23 +787,23 @@
     "peak_kv_stats": {
       "kernel_block_size": 16,
       "total_allocated": 128000,
-      "total_actual": 125425,
-      "total_waste": 2575,
+      "total_actual": 125390,
+      "total_waste": 2610,
       "by_class": {
         "large": {
           "count": 100,
           "allocated": 128000,
-          "actual": 125425,
-          "waste": 2575
+          "actual": 125390,
+          "waste": 2610
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 6296.564504504204,
+        "total_ms": 7091.620899620466,
         "count": 271,
-        "avg_ms": 23.234555367174185,
-        "max_ms": 175.2750468440354
+        "avg_ms": 26.16834280302755,
+        "max_ms": 202.68016098998487
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -757,20 +812,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 5852.048343513161,
+        "total_ms": 6423.570919199847,
         "count": 269,
-        "avg_ms": 21.754826555811007,
-        "max_ms": 169.82992412522435
+        "avg_ms": 23.879445796281956,
+        "max_ms": 196.68782997177914
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 269,
       "output_steps": 269,
-      "avg_step_ms": 0.93,
-      "p50_step_ms": 0.73,
-      "p95_step_ms": 2.15,
-      "max_step_ms": 26.7,
-      "first_output_s": 0.0267
+      "avg_step_ms": 2.58,
+      "p50_step_ms": 2.33,
+      "p95_step_ms": 2.75,
+      "max_step_ms": 10.78,
+      "first_output_s": 0.0004
     },
     "workload": {
       "num_requests": 100,
@@ -783,8 +843,8 @@
     "config": "Fixed-16",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 8.91,
-    "throughput_tokens_per_sec": 2873.21,
+    "elapsed_seconds": 10.55,
+    "throughput_tokens_per_sec": 2425.87,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -810,10 +870,10 @@
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 8360.980217345059,
+        "total_ms": 9822.257339721546,
         "count": 283,
-        "avg_ms": 29.54409970793307,
-        "max_ms": 205.43355494737625
+        "avg_ms": 34.707623108556696,
+        "max_ms": 235.57808197801933
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -822,20 +882,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 7979.9807840026915,
+        "total_ms": 9230.791799316648,
         "count": 281,
-        "avg_ms": 28.398508128123456,
-        "max_ms": 203.46849411725998
+        "avg_ms": 32.84979288013042,
+        "max_ms": 233.24393801158294
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 281,
       "output_steps": 281,
-      "avg_step_ms": 1.47,
-      "p50_step_ms": 1.23,
-      "p95_step_ms": 4.96,
-      "max_step_ms": 5.78,
-      "first_output_s": 0.0006
+      "avg_step_ms": 2.32,
+      "p50_step_ms": 2.49,
+      "p95_step_ms": 3.66,
+      "max_step_ms": 10.63,
+      "first_output_s": 0.0008
     },
     "workload": {
       "num_requests": 100,
@@ -848,8 +913,8 @@
     "config": "Fixed-32",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 8.95,
-    "throughput_tokens_per_sec": 2861.31,
+    "elapsed_seconds": 10.32,
+    "throughput_tokens_per_sec": 2481.27,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -875,10 +940,10 @@
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 8405.672460328788,
+        "total_ms": 9619.619542267174,
         "count": 283,
-        "avg_ms": 29.70202282801692,
-        "max_ms": 205.39489015936852
+        "avg_ms": 33.99158848857658,
+        "max_ms": 234.16147800162435
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -887,20 +952,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 8020.073600579053,
+        "total_ms": 9031.777751573827,
         "count": 281,
-        "avg_ms": 28.541187190672787,
-        "max_ms": 203.2026187516749
+        "avg_ms": 32.141557834782304,
+        "max_ms": 231.6797410021536
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 281,
       "output_steps": 281,
-      "avg_step_ms": 1.67,
-      "p50_step_ms": 1.45,
-      "p95_step_ms": 5.04,
-      "max_step_ms": 5.86,
-      "first_output_s": 0.0006
+      "avg_step_ms": 2.95,
+      "p50_step_ms": 2.49,
+      "p95_step_ms": 9.38,
+      "max_step_ms": 10.54,
+      "first_output_s": 0.0008
     },
     "workload": {
       "num_requests": 100,
@@ -913,8 +983,8 @@
     "config": "Dual-Size",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 11.14,
-    "throughput_tokens_per_sec": 2297.0,
+    "elapsed_seconds": 13.39,
+    "throughput_tokens_per_sec": 1911.38,
     "admission_summary": {
       "large": {
         "count": 100,
@@ -926,24 +996,24 @@
     },
     "peak_kv_stats": {
       "kernel_block_size": 16,
-      "total_allocated": 230400,
-      "total_actual": 228401,
-      "total_waste": 1999,
+      "total_allocated": 230336,
+      "total_actual": 228379,
+      "total_waste": 1957,
       "by_class": {
         "large": {
           "count": 100,
-          "allocated": 230400,
-          "actual": 228401,
-          "waste": 1999
+          "allocated": 230336,
+          "actual": 228379,
+          "waste": 1957
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 10605.153055861592,
-        "count": 283,
-        "avg_ms": 37.474039066648736,
-        "max_ms": 205.53764374926686
+        "total_ms": 12642.16599415522,
+        "count": 310,
+        "avg_ms": 40.78118062630716,
+        "max_ms": 235.76195299392566
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -952,20 +1022,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 10087.386542931199,
-        "count": 281,
-        "avg_ms": 35.89817275064484,
-        "max_ms": 198.60247801989317
+        "total_ms": 11836.596945067868,
+        "count": 308,
+        "avg_ms": 38.430509561908664,
+        "max_ms": 228.8123990292661
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 281,
-      "output_steps": 281,
-      "avg_step_ms": 1.81,
-      "p50_step_ms": 1.56,
-      "p95_step_ms": 5.22,
-      "max_step_ms": 6.03,
-      "first_output_s": 0.0006
+      "total_steps": 308,
+      "output_steps": 308,
+      "avg_step_ms": 2.6,
+      "p50_step_ms": 2.32,
+      "p95_step_ms": 9.05,
+      "max_step_ms": 10.7,
+      "first_output_s": 0.0008
     },
     "workload": {
       "num_requests": 100,
@@ -978,8 +1053,8 @@
     "config": "Fixed-16",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 16.81,
-    "throughput_tokens_per_sec": 1522.68,
+    "elapsed_seconds": 18.99,
+    "throughput_tokens_per_sec": 1348.14,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -1005,10 +1080,10 @@
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 16224.136164877564,
+        "total_ms": 18242.76987637859,
         "count": 308,
-        "avg_ms": 52.675766769083,
-        "max_ms": 265.8773250877857
+        "avg_ms": 59.229772325904506,
+        "max_ms": 299.78590295650065
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1017,20 +1092,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 15770.087915472686,
+        "total_ms": 17609.8924613907,
         "count": 306,
-        "avg_ms": 51.53623501788459,
-        "max_ms": 263.84559320285916
+        "avg_ms": 57.54866817447941,
+        "max_ms": 297.3418260226026
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 306,
       "output_steps": 306,
-      "avg_step_ms": 1.92,
-      "p50_step_ms": 1.49,
-      "p95_step_ms": 5.41,
-      "max_step_ms": 6.08,
-      "first_output_s": 0.0011
+      "avg_step_ms": 2.96,
+      "p50_step_ms": 2.27,
+      "p95_step_ms": 9.63,
+      "max_step_ms": 10.71,
+      "first_output_s": 0.0014
     },
     "workload": {
       "num_requests": 100,
@@ -1043,8 +1123,8 @@
     "config": "Fixed-32",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 16.77,
-    "throughput_tokens_per_sec": 1526.08,
+    "elapsed_seconds": 19.01,
+    "throughput_tokens_per_sec": 1346.47,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -1070,10 +1150,10 @@
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 16197.817429434508,
+        "total_ms": 18235.131768800784,
         "count": 308,
-        "avg_ms": 52.59031632933282,
-        "max_ms": 264.79527400806546
+        "avg_ms": 59.20497327532722,
+        "max_ms": 299.58070296561345
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1082,20 +1162,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 15743.591736536473,
+        "total_ms": 17591.772932268213,
         "count": 306,
-        "avg_ms": 51.44964619783161,
-        "max_ms": 263.0060720257461
+        "avg_ms": 57.48945402702031,
+        "max_ms": 296.92811000859365
       }
+    },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
     },
     "step_metrics": {
       "total_steps": 306,
       "output_steps": 306,
-      "avg_step_ms": 1.92,
-      "p50_step_ms": 1.47,
-      "p95_step_ms": 5.54,
-      "max_step_ms": 5.97,
-      "first_output_s": 0.0012
+      "avg_step_ms": 3.25,
+      "p50_step_ms": 2.29,
+      "p95_step_ms": 10.04,
+      "max_step_ms": 10.86,
+      "first_output_s": 0.0014
     },
     "workload": {
       "num_requests": 100,
@@ -1108,8 +1193,8 @@
     "config": "Dual-Size",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 21.23,
-    "throughput_tokens_per_sec": 1205.84,
+    "elapsed_seconds": 26.79,
+    "throughput_tokens_per_sec": 955.65,
     "admission_summary": {
       "large": {
         "count": 100,
@@ -1121,24 +1206,24 @@
     },
     "peak_kv_stats": {
       "kernel_block_size": 16,
-      "total_allocated": 433984,
-      "total_actual": 432550,
-      "total_waste": 1434,
+      "total_allocated": 238912,
+      "total_actual": 237862,
+      "total_waste": 1050,
       "by_class": {
         "large": {
-          "count": 100,
-          "allocated": 433984,
-          "actual": 432550,
-          "waste": 1434
+          "count": 55,
+          "allocated": 238912,
+          "actual": 237862,
+          "waste": 1050
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 20659.341543912888,
-        "count": 308,
-        "avg_ms": 67.0757842334834,
-        "max_ms": 265.5281526967883
+        "total_ms": 25896.212634106632,
+        "count": 540,
+        "avg_ms": 47.95594932241969,
+        "max_ms": 257.90738698560745
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1147,20 +1232,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 19826.96335017681,
-        "count": 306,
-        "avg_ms": 64.79399787639481,
-        "max_ms": 256.20889198035
+        "total_ms": 24508.049429627135,
+        "count": 538,
+        "avg_ms": 45.55399522235527,
+        "max_ms": 248.93387296469882
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 306,
-      "output_steps": 306,
-      "avg_step_ms": 1.9,
-      "p50_step_ms": 1.4,
-      "p95_step_ms": 5.57,
-      "max_step_ms": 6.3,
-      "first_output_s": 0.001
+      "total_steps": 538,
+      "output_steps": 538,
+      "avg_step_ms": 1.96,
+      "p50_step_ms": 1.31,
+      "p95_step_ms": 9.26,
+      "max_step_ms": 10.72,
+      "first_output_s": 0.0014
     },
     "workload": {
       "num_requests": 100,
@@ -1173,8 +1263,8 @@
     "config": "Fixed-16",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 37.85,
-    "throughput_tokens_per_sec": 676.3,
+    "elapsed_seconds": 42.69,
+    "throughput_tokens_per_sec": 599.63,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -1186,24 +1276,24 @@
     },
     "peak_kv_stats": {
       "kernel_block_size": 16,
-      "total_allocated": 840480,
-      "total_actual": 839650,
-      "total_waste": 830,
+      "total_allocated": 463344,
+      "total_actual": 462905,
+      "total_waste": 439,
       "by_class": {
         "default": {
-          "count": 100,
-          "allocated": 840480,
-          "actual": 839650,
-          "waste": 830
+          "count": 55,
+          "allocated": 463344,
+          "actual": 462905,
+          "waste": 439
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 37198.72143538669,
-        "count": 358,
-        "avg_ms": 103.90704311560528,
-        "max_ms": 380.27503713965416
+        "total_ms": 41720.773894689046,
+        "count": 562,
+        "avg_ms": 74.23625248165311,
+        "max_ms": 342.7046080469154
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1212,20 +1302,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 36643.15857319161,
-        "count": 356,
-        "avg_ms": 102.9302207112124,
-        "max_ms": 378.3001038245857
+        "total_ms": 40660.556947172154,
+        "count": 560,
+        "avg_ms": 72.60813740566456,
+        "max_ms": 340.4518850147724
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 356,
-      "output_steps": 356,
-      "avg_step_ms": 2.16,
+      "total_steps": 560,
+      "output_steps": 560,
+      "avg_step_ms": 2.61,
       "p50_step_ms": 1.39,
-      "p95_step_ms": 5.55,
-      "max_step_ms": 5.99,
-      "first_output_s": 0.0019
+      "p95_step_ms": 9.44,
+      "max_step_ms": 10.86,
+      "first_output_s": 0.0027
     },
     "workload": {
       "num_requests": 100,
@@ -1238,8 +1333,8 @@
     "config": "Fixed-32",
     "num_requests": 100,
     "total_output_tokens": 25600,
-    "elapsed_seconds": 37.75,
-    "throughput_tokens_per_sec": 678.09,
+    "elapsed_seconds": 42.73,
+    "throughput_tokens_per_sec": 599.12,
     "admission_summary": {
       "default": {
         "count": 100,
@@ -1251,24 +1346,24 @@
     },
     "peak_kv_stats": {
       "kernel_block_size": 32,
-      "total_allocated": 841248,
-      "total_actual": 839650,
-      "total_waste": 1598,
+      "total_allocated": 463712,
+      "total_actual": 462897,
+      "total_waste": 815,
       "by_class": {
         "default": {
-          "count": 100,
-          "allocated": 841248,
-          "actual": 839650,
-          "waste": 1598
+          "count": 55,
+          "allocated": 463712,
+          "actual": 462897,
+          "waste": 815
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 37117.06634936854,
-        "count": 358,
-        "avg_ms": 103.67895628315236,
-        "max_ms": 379.9542412161827
+        "total_ms": 41752.10111879278,
+        "count": 562,
+        "avg_ms": 74.29199487329676,
+        "max_ms": 342.42871805327013
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1277,20 +1372,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 36585.25080233812,
-        "count": 356,
-        "avg_ms": 102.76755843353405,
-        "max_ms": 377.90014827623963
+        "total_ms": 40687.930466316175,
+        "count": 560,
+        "avg_ms": 72.65701868985032,
+        "max_ms": 340.25913901859894
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 356,
-      "output_steps": 356,
-      "avg_step_ms": 2.13,
-      "p50_step_ms": 1.4,
-      "p95_step_ms": 5.58,
-      "max_step_ms": 5.85,
-      "first_output_s": 0.002
+      "total_steps": 560,
+      "output_steps": 560,
+      "avg_step_ms": 2.36,
+      "p50_step_ms": 1.18,
+      "p95_step_ms": 9.01,
+      "max_step_ms": 10.1,
+      "first_output_s": 0.0027
     },
     "workload": {
       "num_requests": 100,
@@ -1302,9 +1402,9 @@
   {
     "config": "Dual-Size",
     "num_requests": 100,
-    "total_output_tokens": 25600,
-    "elapsed_seconds": 47.8,
-    "throughput_tokens_per_sec": 535.6,
+    "total_output_tokens": 25239,
+    "elapsed_seconds": 53.89,
+    "throughput_tokens_per_sec": 468.33,
     "admission_summary": {
       "large": {
         "count": 100,
@@ -1316,24 +1416,24 @@
     },
     "peak_kv_stats": {
       "kernel_block_size": 16,
-      "total_allocated": 522656,
-      "total_actual": 521662,
-      "total_waste": 994,
+      "total_allocated": 228064,
+      "total_actual": 227551,
+      "total_waste": 513,
       "by_class": {
         "large": {
-          "count": 62,
-          "allocated": 522656,
-          "actual": 521662,
-          "waste": 994
+          "count": 27,
+          "allocated": 228064,
+          "actual": 227551,
+          "waste": 513
         }
       }
     },
     "execution_timing_stats": {
       "worker_execute_model": {
-        "total_ms": 47054.03878726065,
-        "count": 555,
-        "avg_ms": 84.78205186893811,
-        "max_ms": 317.20098201185465
+        "total_ms": 52641.5788907907,
+        "count": 1050,
+        "avg_ms": 50.13483703884828,
+        "max_ms": 294.9054039781913
       },
       "execute_model": {
         "total_ms": 0.0,
@@ -1342,20 +1442,25 @@
         "max_ms": 0.0
       },
       "_model_forward": {
-        "total_ms": 45386.94013329223,
-        "count": 553,
-        "avg_ms": 82.07403279076352,
-        "max_ms": 307.28208739310503
+        "total_ms": 49936.48397468496,
+        "count": 1048,
+        "avg_ms": 47.64931676973756,
+        "max_ms": 285.48521402990445
       }
     },
+    "promotion_stats": {
+      "count": 0,
+      "kernel_blocks_copied": 0,
+      "logical_tokens_copied": 0
+    },
     "step_metrics": {
-      "total_steps": 553,
-      "output_steps": 553,
-      "avg_step_ms": 1.24,
-      "p50_step_ms": 0.74,
-      "p95_step_ms": 4.9,
-      "max_step_ms": 7.32,
-      "first_output_s": 0.0021
+      "total_steps": 1048,
+      "output_steps": 1048,
+      "avg_step_ms": 1.46,
+      "p50_step_ms": 0.78,
+      "p95_step_ms": 8.69,
+      "max_step_ms": 12.74,
+      "first_output_s": 0.0027
     },
     "workload": {
       "num_requests": 100,

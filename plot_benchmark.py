@@ -15,6 +15,92 @@ import matplotlib.pyplot as plt
 COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52"]
 
 
+def _plot_sweep_lines(results, out_dir):
+    """Generate input-length sweep plots when workload metadata is available."""
+    sweep_rows = [
+        r for r in results
+        if (r.get("workload") or {}).get("input_len") is not None
+    ]
+    if not sweep_rows:
+        return
+
+    grouped = {}
+    for row in sweep_rows:
+        grouped.setdefault(row["config"], []).append(row)
+
+    ordered_names = [r["config"] for r in results if r["config"] in grouped]
+    seen = set()
+    ordered_names = [n for n in ordered_names if not (n in seen or seen.add(n))]
+    colors = {name: COLORS[i % len(COLORS)] for i, name in enumerate(ordered_names)}
+
+    for rows in grouped.values():
+        rows.sort(key=lambda r: r["workload"]["input_len"])
+
+    # Throughput vs input length.
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for name in ordered_names:
+        rows = grouped[name]
+        xs = [r["workload"]["input_len"] for r in rows]
+        ys = [r["throughput_tokens_per_sec"] for r in rows]
+        ax.plot(xs, ys, marker="o", linewidth=2, label=name, color=colors[name])
+    ax.set_xlabel("Input length")
+    ax.set_ylabel("Tokens / second")
+    ax.set_title("Throughput vs input length")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "throughput_vs_input_len.png"), dpi=150)
+    plt.close(fig)
+
+    # Tail waste vs input length.
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for name in ordered_names:
+        rows = grouped[name]
+        xs = [r["workload"]["input_len"] for r in rows]
+        ys = []
+        for r in rows:
+            kv = r.get("peak_kv_stats") or {}
+            alloc = kv.get("total_allocated", 0)
+            waste = kv.get("total_waste", 0)
+            ys.append(waste / alloc * 100 if alloc else 0.0)
+        ax.plot(xs, ys, marker="o", linewidth=2, label=name, color=colors[name])
+    ax.set_xlabel("Input length")
+    ax.set_ylabel("Tail waste (%)")
+    ax.set_title("KV tail waste vs input length")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "tail_waste_vs_input_len.png"), dpi=150)
+    plt.close(fig)
+
+    # Average _model_forward vs input length.
+    if any(
+        (r.get("execution_timing_stats") or {}).get("_model_forward")
+        for r in sweep_rows
+    ):
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for name in ordered_names:
+            rows = grouped[name]
+            xs = [r["workload"]["input_len"] for r in rows]
+            ys = [
+                (r.get("execution_timing_stats") or {})
+                .get("_model_forward", {})
+                .get("avg_ms", 0.0)
+                for r in rows
+            ]
+            ax.plot(xs, ys, marker="o", linewidth=2, label=name,
+                    color=colors[name])
+        ax.set_xlabel("Input length")
+        ax.set_ylabel("Average _model_forward (ms)")
+        ax.set_title("Average _model_forward vs input length")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "model_forward_vs_input_len.png"),
+                    dpi=150)
+        plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("results", help="benchmark_results.json")
@@ -75,6 +161,8 @@ def main():
     fig.tight_layout()
     fig.savefig(os.path.join(args.out, "latency_p95.png"), dpi=150)
     plt.close(fig)
+
+    _plot_sweep_lines(results, args.out)
 
     print(f"Saved figures to {args.out}/")
 
