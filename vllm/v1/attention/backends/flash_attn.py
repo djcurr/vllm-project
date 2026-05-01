@@ -26,6 +26,9 @@ from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
 from vllm.v1.attention.ops.dcp_alltoall import dcp_a2a_lse_reduce
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 
+# Import custom paged attention ops for mixed block size support
+from vllm import _custom_ops as ops
+
 if is_flash_attn_varlen_func_available():
     from vllm.v1.attention.backends.fa_utils import (
         flash_attn_supports_sinks,
@@ -57,6 +60,7 @@ from vllm.v1.attention.backends.utils import (
 from vllm.v1.kv_cache_interface import AttentionSpec
 
 logger = init_logger(__name__)
+_mixed_kernel_debug_emitted = False
 
 
 class FlashAttentionBackend(AttentionBackend):
@@ -231,6 +235,13 @@ class FlashAttentionMetadata:
     max_num_splits: int = 0
 
     causal: bool = True
+
+    # For mixed block size support (experimental dual KV blocks).
+    # Per-request block size multipliers. Each element indicates how many
+    # kernel blocks correspond to one logical block for that sequence.
+    # None means all sequences use multiplier=1 (standard single block size).
+    block_size_multipliers: torch.Tensor | None = None
+    kernel_block_size: int | None = None
 
 
 def _get_sliding_window_configs(
@@ -531,6 +542,8 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
             prefix_scheduler_metadata=prefix_scheduler_metadata,
             max_num_splits=max_num_splits,
             causal=causal,
+            block_size_multipliers=common_attn_metadata.block_size_multipliers,
+            kernel_block_size=common_attn_metadata.kernel_block_size,
         )
         return attn_metadata
 
@@ -626,6 +639,78 @@ class FlashAttentionImpl(AttentionImpl):
         )
         self.dcp_combine = dcp_a2a_lse_reduce if dcp_a2a else cp_lse_ag_out_rs
 
+    def _prepare_unified_dual_kv_block_table(
+        self,
+        block_table: torch.Tensor,
+        seq_lens: torch.Tensor,
+        kernel_block_size: int | None,
+        key_cache: torch.Tensor,
+        block_size_multipliers: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if kernel_block_size is None or block_size_multipliers is None:
+            return block_table
+
+        if kernel_block_size <= 0:
+            raise RuntimeError(
+                "Unified dual KV received invalid kernel_block_size="
+                f"{kernel_block_size}"
+            )
+        if block_table.ndim != 2 or seq_lens.ndim != 1:
+            raise RuntimeError(
+                "Unified dual KV expects rank-2 block_table and rank-1 seq_lens, "
+                f"got block_table.ndim={block_table.ndim}, seq_lens.ndim={seq_lens.ndim}"
+            )
+        num_seqs = block_table.shape[0]
+        if seq_lens.numel() != num_seqs or block_size_multipliers.numel() != num_seqs:
+            raise RuntimeError(
+                "Unified dual KV metadata shape mismatch: "
+                f"block_table rows={num_seqs}, seq_lens.numel()={seq_lens.numel()}, "
+                "block_size_multipliers.numel()="
+                f"{block_size_multipliers.numel()}"
+            )
+        if torch.any(block_size_multipliers <= 0):
+            min_multiplier = int(block_size_multipliers.min().item())
+            raise RuntimeError(
+                "Unified dual KV requires strictly positive block size multipliers, "
+                f"got min_multiplier={min_multiplier}"
+            )
+
+        required_kernel_blocks = (
+            seq_lens.to(torch.int64) + kernel_block_size - 1
+        ) // kernel_block_size
+        max_required_kernel_blocks = int(required_kernel_blocks.max().item())
+        if max_required_kernel_blocks > block_table.shape[1]:
+            raise RuntimeError(
+                "Unified dual KV block_table is too narrow for the active batch: "
+                f"need {max_required_kernel_blocks}, have {block_table.shape[1]}"
+            )
+
+        active_block_table = block_table[:, :max_required_kernel_blocks].contiguous()
+        if max_required_kernel_blocks == 0:
+            return block_table
+
+        arange = torch.arange(
+            max_required_kernel_blocks, device=active_block_table.device
+        ).unsqueeze(0)
+        active_mask = arange < required_kernel_blocks.unsqueeze(1)
+        referenced_block_ids = active_block_table[active_mask]
+        if referenced_block_ids.numel() == 0:
+            return block_table
+
+        min_block_id = int(referenced_block_ids.min().item())
+        max_block_id = int(referenced_block_ids.max().item())
+        num_kv_blocks = int(key_cache.shape[0])
+        if min_block_id < 0 or max_block_id >= num_kv_blocks:
+            raise RuntimeError(
+                "Unified dual KV block_table references invalid physical pages: "
+                f"min_block_id={min_block_id}, max_block_id={max_block_id}, "
+                f"num_kv_blocks={num_kv_blocks}, "
+                f"max_required_kernel_blocks={max_required_kernel_blocks}"
+            )
+        # Return the original full-width block table so the varlen FA path
+        # sees the same rectangular layout as standard single-size vLLM.
+        return block_table
+
     def forward(
         self,
         layer: torch.nn.Module,
@@ -718,6 +803,15 @@ class FlashAttentionImpl(AttentionImpl):
             k_descale = layer._k_scale.expand(descale_shape)
             v_descale = layer._v_scale.expand(descale_shape)
 
+            num_reqs = cu_seqlens_q.shape[0] - 1
+            is_decode_only = (
+                attn_metadata.max_query_len == 1 and num_actual_tokens == num_reqs
+            )
+            has_prefill = False
+            if cu_seqlens_q is not None:
+                query_lens = cu_seqlens_q[1:] - cu_seqlens_q[:-1]
+                has_prefill = bool((query_lens > 1).any().item())
+
             if self.dcp_world_size > 1:
                 self._forward_with_dcp(
                     query[:num_actual_tokens],
@@ -732,12 +826,41 @@ class FlashAttentionImpl(AttentionImpl):
                     v_descale=v_descale,
                 )
                 return output
+            elif (
+                attn_metadata.block_size_multipliers is not None
+                and attn_metadata.kernel_block_size is not None
+                and is_decode_only
+                and not has_prefill
+                and envs.VLLM_EXPERIMENTAL_DUAL_KV_MIXED_KERNEL
+            ):
+                # The mixed paged-attention kernels are decode-only: they expect
+                # one query row per scheduled request. Prefill and mixed
+                # prefill-decode batches must stay on the existing varlen path.
+                self._forward_mixed_block_size(
+                    query[:num_actual_tokens],
+                    key_cache,
+                    value_cache,
+                    output[:num_actual_tokens],
+                    attn_metadata,
+                )
+                return output
             else:
                 sliding_window_size = (
                     list(self.sliding_window)
                     if self.sliding_window is not None
                     else None
                 )
+                if not hasattr(attn_metadata, "_prepared_block_table"):
+                    attn_metadata._prepared_block_table = (
+                        self._prepare_unified_dual_kv_block_table(
+                            block_table,
+                            seqused_k,
+                            attn_metadata.kernel_block_size,
+                            key_cache,
+                            attn_metadata.block_size_multipliers,
+                        )
+                    )
+                block_table = attn_metadata._prepared_block_table
                 flash_attn_varlen_func(
                     q=query[:num_actual_tokens],
                     k=key_cache,
@@ -913,6 +1036,223 @@ class FlashAttentionImpl(AttentionImpl):
             query_attn_out,
             query_lse,
         )
+
+    def _forward_mixed_block_size(
+        self,
+        query: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        output: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
+    ) -> torch.Tensor:
+        """Forward pass using mixed block size paged attention kernels.
+        
+        This is used for experimental dual KV blocks where different sequences
+        can have different logical block sizes (e.g., 16 and 32) while using
+        a common kernel block size (e.g., 16).
+        
+        Args:
+            query: shape = [num_tokens, num_heads, head_size]
+            key_cache: shape = [num_blocks, block_size, num_kv_heads, head_size]
+            value_cache: shape = [num_blocks, block_size, num_kv_heads, head_size]
+            output: shape = [num_tokens, num_heads, head_size]
+            attn_metadata: Metadata containing block_size_multipliers
+        """
+        assert attn_metadata.block_size_multipliers is not None
+        assert attn_metadata.kernel_block_size is not None
+
+        if self.kv_cache_dtype.startswith("fp8"):
+            raise NotImplementedError(
+                "Mixed block size kernels do not yet support FP8 KV cache"
+            )
+
+        # Get metadata
+        block_table = attn_metadata.block_table
+        seq_lens = attn_metadata.seq_lens
+        block_size_multipliers = attn_metadata.block_size_multipliers
+        kernel_block_size = attn_metadata.kernel_block_size
+        max_seq_len = attn_metadata.max_seq_len
+
+        if query.ndim != 3 or output.ndim != 3:
+            raise RuntimeError(
+                "Mixed block size attention expects rank-3 query/output tensors, "
+                f"got query.ndim={query.ndim}, output.ndim={output.ndim}"
+            )
+        if block_table.ndim != 2 or seq_lens.ndim != 1 or block_size_multipliers.ndim != 1:
+            raise RuntimeError(
+                "Mixed block size attention expects block_table rank 2 and "
+                "seq_lens/block_size_multipliers rank 1, got "
+                f"{block_table.ndim=}, {seq_lens.ndim=}, "
+                f"{block_size_multipliers.ndim=}"
+            )
+
+        # Prepare output tensors
+        num_seqs = query.size(0)
+        num_heads = query.size(1)
+        head_size = query.size(2)
+
+        if output.shape != query.shape:
+            raise RuntimeError(
+                "Mixed block size attention expects query/output shapes to match, "
+                f"got query.shape={tuple(query.shape)}, "
+                f"output.shape={tuple(output.shape)}"
+            )
+        if seq_lens.numel() != num_seqs or block_size_multipliers.numel() != num_seqs:
+            raise RuntimeError(
+                "Mixed block size attention metadata is inconsistent with query: "
+                f"num_seqs={num_seqs}, seq_lens.numel()={seq_lens.numel()}, "
+                "block_size_multipliers.numel()="
+                f"{block_size_multipliers.numel()}"
+            )
+        if block_table.shape[0] != num_seqs:
+            raise RuntimeError(
+                "Mixed block size attention block_table row count does not match "
+                f"query batch: block_table.shape[0]={block_table.shape[0]}, "
+                f"num_seqs={num_seqs}"
+            )
+        if block_table.dtype != torch.int32 or seq_lens.dtype != torch.int32 \
+                or block_size_multipliers.dtype != torch.int32:
+            raise RuntimeError(
+                "Mixed block size attention expects int32 metadata tensors, got "
+                f"block_table.dtype={block_table.dtype}, "
+                f"seq_lens.dtype={seq_lens.dtype}, "
+                "block_size_multipliers.dtype="
+                f"{block_size_multipliers.dtype}"
+            )
+        if kernel_block_size <= 0:
+            raise RuntimeError(
+                f"Mixed block size attention received invalid kernel_block_size="
+                f"{kernel_block_size}"
+            )
+        mixed_kernel_state = getattr(attn_metadata, "_mixed_kernel_state", None)
+        if mixed_kernel_state is None:
+            # Determine whether to use v1 or v2 based on sequence length.
+            use_v2 = max_seq_len > 8192  # Threshold for partitioned attention
+            if torch.any(block_size_multipliers <= 0):
+                min_multiplier = int(block_size_multipliers.min().item())
+                raise RuntimeError(
+                    "Mixed block size attention received non-positive "
+                    f"block_size_multipliers (min={min_multiplier})"
+                )
+            required_kernel_blocks = (
+                seq_lens.to(torch.int64) + kernel_block_size - 1
+            ) // kernel_block_size
+            max_required_kernel_blocks = int(required_kernel_blocks.max().item())
+            if max_required_kernel_blocks > block_table.shape[1]:
+                raise RuntimeError(
+                    "Mixed block size attention block_table is too narrow for the "
+                    "referenced kernel pages: "
+                    f"need {max_required_kernel_blocks}, have {block_table.shape[1]}"
+                )
+            if max_required_kernel_blocks > 0:
+                arange = torch.arange(
+                    max_required_kernel_blocks, device=block_table.device
+                ).unsqueeze(0)
+                active_mask = arange < required_kernel_blocks.unsqueeze(1)
+                referenced_block_ids = block_table[:, :max_required_kernel_blocks][
+                    active_mask
+                ]
+                if referenced_block_ids.numel() > 0:
+                    min_block_id = int(referenced_block_ids.min().item())
+                    max_block_id = int(referenced_block_ids.max().item())
+                    num_kv_blocks = int(key_cache.shape[0])
+                    if min_block_id < 0 or max_block_id >= num_kv_blocks:
+                        raise RuntimeError(
+                            "Mixed block size attention block_table references invalid "
+                            "KV blocks: "
+                            f"min_block_id={min_block_id}, "
+                            f"max_block_id={max_block_id}, "
+                            f"num_kv_blocks={num_kv_blocks}, "
+                            f"max_required_kernel_blocks={max_required_kernel_blocks}"
+                        )
+
+            global _mixed_kernel_debug_emitted
+            if logger.isEnabledFor(10) and not _mixed_kernel_debug_emitted:
+                num_dump_blocks = min(block_table.shape[1], 16)
+                logger.debug(
+                    "Mixed kernel debug: query_shape=%s output_shape=%s "
+                    "key_cache_shape=%s value_cache_shape=%s "
+                    "max_seq_len=%s kernel_block_size=%s num_seqs=%s "
+                    "seq_lens=%s block_size_multipliers=%s block_table_prefix=%s",
+                    tuple(query.shape),
+                    tuple(output.shape),
+                    tuple(key_cache.shape),
+                    tuple(value_cache.shape),
+                    max_seq_len,
+                    kernel_block_size,
+                    num_seqs,
+                    seq_lens.detach().cpu().tolist(),
+                    block_size_multipliers.detach().cpu().tolist(),
+                    block_table[:, :num_dump_blocks].detach().cpu().tolist(),
+                )
+                _mixed_kernel_debug_emitted = True
+            mixed_kernel_state = {"use_v2": use_v2}
+            attn_metadata._mixed_kernel_state = mixed_kernel_state
+        else:
+            use_v2 = mixed_kernel_state["use_v2"]
+
+        # Kernel expects [num_seqs, num_heads, head_size] layout.
+        query_t = query
+
+        if use_v2:
+            # Allocate temporary tensors for v2
+            max_num_partitions = (max_seq_len + 511) // 512  # PARTITION_SIZE=512
+            exp_sums = torch.empty(
+                (num_seqs, num_heads, max_num_partitions),
+                dtype=torch.float32,
+                device=query.device,
+            )
+            max_logits = torch.empty(
+                (num_seqs, num_heads, max_num_partitions),
+                dtype=torch.float32,
+                device=query.device,
+            )
+            tmp_out = torch.empty(
+                (num_seqs, num_heads, max_num_partitions, head_size),
+                dtype=output.dtype,
+                device=query.device,
+            )
+            
+            ops.paged_attention_v2_mixed(
+                output,  # [num_seqs, num_heads, head_size]
+                exp_sums,
+                max_logits,
+                tmp_out,
+                query_t,
+                key_cache,
+                value_cache,
+                self.num_kv_heads,
+                self.scale,
+                block_table,
+                seq_lens,
+                block_size_multipliers,
+                max_seq_len,
+                kernel_block_size,
+                self.alibi_slopes,
+                self.kv_cache_dtype,
+                torch.empty(0, device=query.device),  # k_scale (not used)
+                torch.empty(0, device=query.device),  # v_scale (not used)
+            )
+        else:
+            ops.paged_attention_v1_mixed(
+                output,  # [num_seqs, num_heads, head_size]
+                query_t,
+                key_cache,
+                value_cache,
+                self.num_kv_heads,
+                self.scale,
+                block_table,
+                seq_lens,
+                block_size_multipliers,
+                max_seq_len,
+                kernel_block_size,
+                self.alibi_slopes,
+                self.kv_cache_dtype,
+                torch.empty(0, device=query.device),  # k_scale (not used)
+                torch.empty(0, device=query.device),  # v_scale (not used)
+            )
+        
+        return output
 
     def _forward_encoder_attention(
         self,

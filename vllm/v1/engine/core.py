@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import faulthandler
 import os
 import queue
 import signal
+import sys
 import threading
 import time
+from copy import deepcopy
 from collections import defaultdict, deque
 from collections.abc import Callable, Generator
 from concurrent.futures import Future
@@ -109,6 +112,11 @@ class EngineCore:
             )
 
         self.log_stats = log_stats
+        self._hang_timeout_s = envs.VLLM_ENGINECORE_HANG_TIMEOUT
+        self._last_progress_time = time.time()
+        self._hang_watchdog_stop = threading.Event()
+        self._hang_watchdog_triggered = False
+        self._hang_watchdog_thread: threading.Thread | None = None
 
         # Setup Model.
         self.model_executor = executor_class(vllm_config)
@@ -255,7 +263,7 @@ class EngineCore:
         # Track max_model_len before KV cache config to detect auto-fit changes
         max_model_len_before = vllm_config.model_config.max_model_len
 
-        kv_cache_configs = get_kv_cache_configs(
+        kv_cache_configs = self._get_engine_kv_cache_configs(
             vllm_config, kv_cache_specs, available_gpu_memory
         )
 
@@ -267,8 +275,19 @@ class EngineCore:
             self.collective_rpc("update_max_model_len", args=(max_model_len_after,))
 
         scheduler_kv_cache_config = generate_scheduler_kv_cache_config(kv_cache_configs)
-        vllm_config.cache_config.num_gpu_blocks = scheduler_kv_cache_config.num_blocks
-        kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
+        if vllm_config.cache_config.experimental_dual_kv_blocks:
+            assert scheduler_kv_cache_config.aux_kv_cache_configs is not None
+            all_scheduler_configs = [
+                scheduler_kv_cache_config,
+                *scheduler_kv_cache_config.aux_kv_cache_configs.values(),
+            ]
+            vllm_config.cache_config.num_gpu_blocks = sum(
+                cfg.num_blocks for cfg in all_scheduler_configs
+            )
+            kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
+        else:
+            vllm_config.cache_config.num_gpu_blocks = scheduler_kv_cache_config.num_blocks
+            kv_cache_groups = scheduler_kv_cache_config.kv_cache_groups
         if kv_cache_groups:
             vllm_config.cache_config.block_size = min(
                 g.kv_cache_spec.block_size for g in kv_cache_groups
@@ -286,6 +305,79 @@ class EngineCore:
             scope="local",
         )
         return scheduler_kv_cache_config
+
+    def _get_engine_kv_cache_configs(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_specs: list[dict[str, Any]],
+        available_gpu_memory: list[int],
+    ) -> list[KVCacheConfig]:
+        cache_config = vllm_config.cache_config
+        if not cache_config.experimental_dual_kv_blocks:
+            return get_kv_cache_configs(vllm_config, kv_cache_specs, available_gpu_memory)
+
+        return self._get_dual_kv_cache_configs(
+            vllm_config,
+            kv_cache_specs,
+            available_gpu_memory,
+        )
+
+    def _get_dual_kv_cache_configs(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_specs: list[dict[str, Any]],
+        available_gpu_memory: list[int],
+    ) -> list[KVCacheConfig]:
+        cache_config = vllm_config.cache_config
+        assert cache_config.experimental_dual_kv_blocks
+
+        if any(len(spec) == 0 for spec in kv_cache_specs):
+            raise ValueError(
+                "experimental_dual_kv_blocks requires models with KV cache"
+            )
+
+        small_size = cache_config.experimental_small_kv_block_size
+        large_size = cache_config.experimental_large_kv_block_size
+        pool_fraction = cache_config.experimental_small_kv_pool_fraction
+
+        small_specs = self._copy_kv_cache_specs_with_block_size(kv_cache_specs, small_size)
+        large_specs = self._copy_kv_cache_specs_with_block_size(kv_cache_specs, large_size)
+
+        small_memory = [max(1, int(mem * pool_fraction)) for mem in available_gpu_memory]
+        large_memory = [
+            max(1, mem - small_mem)
+            for mem, small_mem in zip(available_gpu_memory, small_memory)
+        ]
+
+        small_configs = get_kv_cache_configs(vllm_config, small_specs, small_memory)
+        large_configs = get_kv_cache_configs(vllm_config, large_specs, large_memory)
+
+        combined_configs: list[KVCacheConfig] = []
+        for small_cfg, large_cfg in zip(small_configs, large_configs):
+            if len(small_cfg.kv_cache_groups) != 1 or len(large_cfg.kv_cache_groups) != 1:
+                raise ValueError(
+                    "experimental_dual_kv_blocks currently supports exactly one "
+                    "KV cache group per worker"
+                )
+            small_cfg.kv_size_class = "small"
+            large_cfg.kv_size_class = "large"
+            small_cfg.aux_kv_cache_configs = {"large": large_cfg}
+            combined_configs.append(small_cfg)
+
+        return combined_configs
+
+    def _copy_kv_cache_specs_with_block_size(
+        self,
+        kv_cache_specs: list[dict[str, Any]],
+        block_size: int,
+    ) -> list[dict[str, Any]]:
+        copied_specs: list[dict[str, Any]] = []
+        for worker_specs in kv_cache_specs:
+            copied_specs.append({
+                layer_name: deepcopy(spec).copy_with_new_block_size(block_size)
+                for layer_name, spec in worker_specs.items()
+            })
+        return copied_specs
 
     def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
         return self.model_executor.supported_tasks
@@ -749,6 +841,7 @@ class EngineCore:
             )
 
         req = Request.from_engine_core_request(request, self.request_block_hasher)
+        self._assign_request_kv_size_class(req)
         if req.use_structured_output:
             # Note on thread safety: no race condition.
             # `grammar_init` is only invoked in input processing thread. For
@@ -757,6 +850,29 @@ class EngineCore:
             # compilation status before scheduling request.
             self.structured_output_manager.grammar_init(req)
         return req, request.current_wave
+
+    def _assign_request_kv_size_class(self, request: Request) -> None:
+        cache_config = self.vllm_config.cache_config
+        if not cache_config.experimental_dual_kv_blocks:
+            request.kv_size_class = "default"
+            request.kv_block_size = cache_config.block_size
+            return
+
+        expected_total_tokens = request.num_prompt_tokens + request.max_tokens
+        # Large logical KV blocks are only worthwhile once a request is long
+        # enough to amortize the extra mixed-kernel overhead and coarser
+        # rounding. Keep shorter requests on the small path even if the
+        # configured threshold is low.
+        effective_large_threshold = max(
+            cache_config.experimental_dual_kv_threshold_tokens,
+            cache_config.experimental_large_kv_block_size * 32,
+        )
+        if expected_total_tokens <= effective_large_threshold:
+            request.kv_size_class = "small"
+            request.kv_block_size = cache_config.experimental_small_kv_block_size
+        else:
+            request.kv_size_class = "large"
+            request.kv_block_size = cache_config.experimental_large_kv_block_size
 
     def _eep_scale_up_before_kv_init(self):
         raise NotImplementedError
@@ -1135,12 +1251,14 @@ class EngineCoreProc(EngineCore):
 
     def run_busy_loop(self):
         """Core busy loop of the EngineCore."""
+        self._start_hang_watchdog()
         while self._handle_shutdown():
             # 1) Poll the input queue until there is work to do.
             self._process_input_queue()
             # 2) Step the engine core and return the outputs.
             self._process_engine_step()
 
+        self._stop_hang_watchdog()
         raise SystemExit
 
     def _process_input_queue(self):
@@ -1177,6 +1295,7 @@ class EngineCoreProc(EngineCore):
     def _process_engine_step(self) -> bool:
         """Called only when there are unfinished local requests."""
 
+        self._last_progress_time = time.time()
         # Step the engine core.
         outputs, model_executed = self.step_fn()
         # Put EngineCoreOutputs into the output queue.
@@ -1184,6 +1303,7 @@ class EngineCoreProc(EngineCore):
             self.output_queue.put_nowait(output)
         # Post-step hook.
         self.post_step(model_executed)
+        self._last_progress_time = time.time()
 
         # If no model execution happened but there are waiting requests
         # (e.g., WAITING_FOR_REMOTE_KVS), yield the GIL briefly to allow
@@ -1193,6 +1313,40 @@ class EngineCoreProc(EngineCore):
             time.sleep(0.001)
 
         return model_executed
+
+    def _start_hang_watchdog(self) -> None:
+        if self._hang_timeout_s <= 0 or self._hang_watchdog_thread is not None:
+            return
+        faulthandler.enable()
+
+        def _watchdog() -> None:
+            while not self._hang_watchdog_stop.is_set():
+                time.sleep(1.0)
+                if self._hang_watchdog_triggered:
+                    continue
+                if not self.is_running() or not self.has_work():
+                    continue
+                elapsed = time.time() - self._last_progress_time
+                if elapsed >= self._hang_timeout_s:
+                    self._hang_watchdog_triggered = True
+                    logger.error(
+                        "EngineCore hang watchdog fired after %.1fs; dumping stacks.",
+                        elapsed,
+                    )
+                    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+
+        self._hang_watchdog_thread = threading.Thread(
+            target=_watchdog,
+            name="EngineCoreHangWatchdog",
+            daemon=True,
+        )
+        self._hang_watchdog_thread.start()
+
+    def _stop_hang_watchdog(self) -> None:
+        if self._hang_watchdog_thread is None:
+            return
+        self._hang_watchdog_stop.set()
+        self._hang_watchdog_thread.join(timeout=1.0)
 
     def _notify_idle_state_callbacks(self) -> None:
         while self._idle_state_callbacks:

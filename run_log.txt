@@ -1,0 +1,959 @@
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  128
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 384
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=2922) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=2922) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=2922) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.16it/s]
+(EngineCore pid=2922) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=384.0 min=384 max=384
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 38400
+    Total actual tokens:    36892
+    Total tail waste:       1508
+    Waste %%:                 3.93%
+    -- class=default, count=100, allocated=38400, actual=36892, waste=1508 (3.93%)
+  Step Metrics (Fixed-16):
+    Total steps:           259
+    Output-producing steps:259
+    Avg step time:         2.49 ms
+    P50 step time:         2.39 ms
+    P95 step time:         2.48 ms
+    Max step time:         18.65 ms
+    Time to first output:  0.019 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=261, total=4611.01 ms, avg=17.67 ms, max=187.47 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=259, total=4140.45 ms, avg=15.99 ms, max=178.33 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 5.26s
+  Output tokens: 25600
+  Throughput: 4864.45 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=3151) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=3151) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.14it/s]
+(EngineCore pid=3151) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.13it/s]
+(EngineCore pid=3151) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=384.0 min=384 max=384
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 38400
+    Total actual tokens:    35292
+    Total tail waste:       3108
+    Waste %%:                 8.09%
+    -- class=default, count=100, allocated=38400, actual=35292, waste=3108 (8.09%)
+  Step Metrics (Fixed-32):
+    Total steps:           259
+    Output-producing steps:259
+    Avg step time:         2.39 ms
+    P50 step time:         2.37 ms
+    P95 step time:         2.43 ms
+    Max step time:         9.44 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=261, total=4665.51 ms, avg=17.88 ms, max=176.50 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=259, total=4093.40 ms, avg=15.80 ms, max=169.03 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 5.33s
+  Output tokens: 25600
+  Throughput: 4800.77 tok/s
+[rank0]:[W501 18:50:23.039634587 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=3519) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=3519) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.14it/s]
+(EngineCore pid=3519) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.13it/s]
+(EngineCore pid=3519) 
+  Initial Admission Summary (Dual-Size):
+    -- class=small, count=100, block_size=16, expected_total avg=384.0 min=384 max=384
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 38400
+    Total actual tokens:    36892
+    Total tail waste:       1508
+    Waste %%:                 3.93%
+    -- class=small, count=100, allocated=38400, actual=36892, waste=1508 (3.93%)
+  Step Metrics (Dual-Size):
+    Total steps:           259
+    Output-producing steps:259
+    Avg step time:         2.31 ms
+    P50 step time:         2.28 ms
+    P95 step time:         2.37 ms
+    Max step time:         10.52 ms
+    Time to first output:  0.000 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=261, total=4275.87 ms, avg=16.38 ms, max=183.84 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=259, total=3724.18 ms, avg=14.38 ms, max=177.21 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 4.95s
+  Output tokens: 25600
+  Throughput: 5170.79 tok/s
+[rank0]:[W501 18:50:49.592665414 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         4864.45 tok/s
+Fixed-32         4800.77 tok/s
+Dual-Size        5170.79 tok/s
+Dual vs Fixed-16:  +6.3%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  256
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 512
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=4069) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=4069) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.10it/s]
+(EngineCore pid=4069) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.09it/s]
+(EngineCore pid=4069) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=512.0 min=512 max=512
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 51200
+    Total actual tokens:    49725
+    Total tail waste:       1475
+    Waste %%:                 2.88%
+    -- class=default, count=100, allocated=51200, actual=49725, waste=1475 (2.88%)
+  Step Metrics (Fixed-16):
+    Total steps:           260
+    Output-producing steps:260
+    Avg step time:         2.36 ms
+    P50 step time:         2.30 ms
+    P95 step time:         2.39 ms
+    Max step time:         10.93 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=262, total=5048.87 ms, avg=19.27 ms, max=188.11 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=260, total=4480.00 ms, avg=17.23 ms, max=182.82 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 5.73s
+  Output tokens: 25600
+  Throughput: 4465.90 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=4305) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=4305) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.08it/s]
+(EngineCore pid=4305) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.07it/s]
+(EngineCore pid=4305) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=512.0 min=512 max=512
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 51200
+    Total actual tokens:    48122
+    Total tail waste:       3078
+    Waste %%:                 6.01%
+    -- class=default, count=100, allocated=51200, actual=48122, waste=3078 (6.01%)
+  Step Metrics (Fixed-32):
+    Total steps:           260
+    Output-producing steps:260
+    Avg step time:         2.38 ms
+    P50 step time:         2.30 ms
+    P95 step time:         2.39 ms
+    Max step time:         10.78 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=262, total=4986.48 ms, avg=19.03 ms, max=177.89 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=260, total=4398.67 ms, avg=16.92 ms, max=171.10 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 5.67s
+  Output tokens: 25600
+  Throughput: 4512.75 tok/s
+[rank0]:[W501 18:51:44.913685234 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=4671) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=4671) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.15it/s]
+(EngineCore pid=4671) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.15it/s]
+(EngineCore pid=4671) 
+  Initial Admission Summary (Dual-Size):
+    -- class=small, count=100, block_size=16, expected_total avg=512.0 min=512 max=512
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 51200
+    Total actual tokens:    49719
+    Total tail waste:       1481
+    Waste %%:                 2.89%
+    -- class=small, count=100, allocated=51200, actual=49719, waste=1481 (2.89%)
+  Step Metrics (Dual-Size):
+    Total steps:           260
+    Output-producing steps:260
+    Avg step time:         2.37 ms
+    P50 step time:         2.31 ms
+    P95 step time:         2.38 ms
+    Max step time:         11.21 ms
+    Time to first output:  0.000 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=262, total=4713.40 ms, avg=17.99 ms, max=180.80 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=260, total=4113.21 ms, avg=15.82 ms, max=175.59 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 5.41s
+  Output tokens: 25600
+  Throughput: 4731.27 tok/s
+[rank0]:[W501 18:52:10.410572034 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         4465.90 tok/s
+Fixed-32         4512.75 tok/s
+Dual-Size        4731.27 tok/s
+Dual vs Fixed-16:  +5.9%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  512
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 768
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=5221) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=5221) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=5221) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=5221) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=768.0 min=768 max=768
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 76800
+    Total actual tokens:    75472
+    Total tail waste:       1328
+    Waste %%:                 1.73%
+    -- class=default, count=100, allocated=76800, actual=75472, waste=1328 (1.73%)
+  Step Metrics (Fixed-16):
+    Total steps:           263
+    Output-producing steps:263
+    Avg step time:         2.51 ms
+    P50 step time:         2.43 ms
+    P95 step time:         2.52 ms
+    Max step time:         10.76 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=265, total=5568.73 ms, avg=21.01 ms, max=198.04 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=263, total=4996.90 ms, avg=19.00 ms, max=188.51 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 6.26s
+  Output tokens: 25600
+  Throughput: 4088.99 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=5455) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=5455) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.09it/s]
+(EngineCore pid=5455) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.08it/s]
+(EngineCore pid=5455) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=768.0 min=768 max=768
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 76800
+    Total actual tokens:    73872
+    Total tail waste:       2928
+    Waste %%:                 3.81%
+    -- class=default, count=100, allocated=76800, actual=73872, waste=2928 (3.81%)
+  Step Metrics (Fixed-32):
+    Total steps:           263
+    Output-producing steps:263
+    Avg step time:         2.55 ms
+    P50 step time:         2.44 ms
+    P95 step time:         2.49 ms
+    Max step time:         10.72 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=265, total=5646.15 ms, avg=21.31 ms, max=185.15 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=263, total=5068.97 ms, avg=19.27 ms, max=182.15 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 6.35s
+  Output tokens: 25600
+  Throughput: 4032.19 tok/s
+[rank0]:[W501 18:53:07.808288614 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=5826) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=5826) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.21it/s]
+(EngineCore pid=5826) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.20it/s]
+(EngineCore pid=5826) 
+  Initial Admission Summary (Dual-Size):
+    -- class=small, count=100, block_size=16, expected_total avg=768.0 min=768 max=768
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 76800
+    Total actual tokens:    75537
+    Total tail waste:       1263
+    Waste %%:                 1.64%
+    -- class=small, count=100, allocated=76800, actual=75537, waste=1263 (1.64%)
+  Step Metrics (Dual-Size):
+    Total steps:           263
+    Output-producing steps:263
+    Avg step time:         2.86 ms
+    P50 step time:         2.38 ms
+    P95 step time:         2.58 ms
+    Max step time:         98.26 ms
+    Time to first output:  0.098 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=265, total=5337.77 ms, avg=20.14 ms, max=187.57 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=263, total=4696.89 ms, avg=17.86 ms, max=183.82 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 6.05s
+  Output tokens: 25600
+  Throughput: 4231.95 tok/s
+[rank0]:[W501 18:53:34.627916853 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         4088.99 tok/s
+Fixed-32         4032.19 tok/s
+Dual-Size        4231.95 tok/s
+Dual vs Fixed-16:  +3.5%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  1024
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 1280
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=6386) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=6386) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.06it/s]
+(EngineCore pid=6386) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.05it/s]
+(EngineCore pid=6386) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=1280.0 min=1280 max=1280
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 128000
+    Total actual tokens:    126990
+    Total tail waste:       1010
+    Waste %%:                 0.79%
+    -- class=default, count=100, allocated=128000, actual=126990, waste=1010 (0.79%)
+  Step Metrics (Fixed-16):
+    Total steps:           269
+    Output-producing steps:269
+    Avg step time:         2.66 ms
+    P50 step time:         2.39 ms
+    P95 step time:         2.49 ms
+    Max step time:         10.50 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=271, total=6862.64 ms, avg=25.32 ms, max=203.24 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=269, total=6256.17 ms, avg=23.26 ms, max=200.35 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 7.57s
+  Output tokens: 25600
+  Throughput: 3382.90 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=6624) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=6624) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.18it/s]
+(EngineCore pid=6624) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.18it/s]
+(EngineCore pid=6624) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=1280.0 min=1280 max=1280
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 128000
+    Total actual tokens:    125390
+    Total tail waste:       2610
+    Waste %%:                 2.04%
+    -- class=default, count=100, allocated=128000, actual=125390, waste=2610 (2.04%)
+  Step Metrics (Fixed-32):
+    Total steps:           269
+    Output-producing steps:269
+    Avg step time:         2.64 ms
+    P50 step time:         2.39 ms
+    P95 step time:         2.49 ms
+    Max step time:         10.80 ms
+    Time to first output:  0.000 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=271, total=6785.11 ms, avg=25.04 ms, max=203.04 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=269, total=6195.31 ms, avg=23.03 ms, max=200.39 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 7.47s
+  Output tokens: 25600
+  Throughput: 3425.18 tok/s
+[rank0]:[W501 18:54:33.151638206 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=6999) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=6999) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.11it/s]
+(EngineCore pid=6999) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.10it/s]
+(EngineCore pid=6999) 
+  Initial Admission Summary (Dual-Size):
+    -- class=large, count=100, block_size=32, expected_total avg=1280.0 min=1280 max=1280
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 128000
+    Total actual tokens:    125390
+    Total tail waste:       2610
+    Waste %%:                 2.04%
+    -- class=large, count=100, allocated=128000, actual=125390, waste=2610 (2.04%)
+  Step Metrics (Dual-Size):
+    Total steps:           269
+    Output-producing steps:269
+    Avg step time:         2.58 ms
+    P50 step time:         2.33 ms
+    P95 step time:         2.75 ms
+    Max step time:         10.78 ms
+    Time to first output:  0.000 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=271, total=7091.62 ms, avg=26.17 ms, max=202.68 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=269, total=6423.57 ms, avg=23.88 ms, max=196.69 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 7.80s
+  Output tokens: 25600
+  Throughput: 3280.11 tok/s
+[rank0]:[W501 18:55:01.898414854 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         3382.90 tok/s
+Fixed-32         3425.18 tok/s
+Dual-Size        3280.11 tok/s
+Dual vs Fixed-16:  -3.0%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  2048
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 2304
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=7562) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=7562) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.18it/s]
+(EngineCore pid=7562) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.18it/s]
+(EngineCore pid=7562) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=2304.0 min=2304 max=2304
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 229760
+    Total actual tokens:    229000
+    Total tail waste:       760
+    Waste %%:                 0.33%
+    -- class=default, count=100, allocated=229760, actual=229000, waste=760 (0.33%)
+  Step Metrics (Fixed-16):
+    Total steps:           281
+    Output-producing steps:281
+    Avg step time:         2.32 ms
+    P50 step time:         2.49 ms
+    P95 step time:         3.66 ms
+    Max step time:         10.63 ms
+    Time to first output:  0.001 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=283, total=9822.26 ms, avg=34.71 ms, max=235.58 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=281, total=9230.79 ms, avg=32.85 ms, max=233.24 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 10.55s
+  Output tokens: 25600
+  Throughput: 2425.87 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=7817) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=7817) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.14it/s]
+(EngineCore pid=7817) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.13it/s]
+(EngineCore pid=7817) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=2304.0 min=2304 max=2304
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 230400
+    Total actual tokens:    228401
+    Total tail waste:       1999
+    Waste %%:                 0.87%
+    -- class=default, count=100, allocated=230400, actual=228401, waste=1999 (0.87%)
+  Step Metrics (Fixed-32):
+    Total steps:           281
+    Output-producing steps:281
+    Avg step time:         2.95 ms
+    P50 step time:         2.49 ms
+    P95 step time:         9.38 ms
+    Max step time:         10.54 ms
+    Time to first output:  0.001 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=283, total=9619.62 ms, avg=33.99 ms, max=234.16 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=281, total=9031.78 ms, avg=32.14 ms, max=231.68 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 10.32s
+  Output tokens: 25600
+  Throughput: 2481.27 tok/s
+[rank0]:[W501 18:56:06.819128152 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=8150) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=8150) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.26it/s]
+(EngineCore pid=8150) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.26it/s]
+(EngineCore pid=8150) 
+  Initial Admission Summary (Dual-Size):
+    -- class=large, count=100, block_size=32, expected_total avg=2304.0 min=2304 max=2304
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 230336
+    Total actual tokens:    228379
+    Total tail waste:       1957
+    Waste %%:                 0.85%
+    -- class=large, count=100, allocated=230336, actual=228379, waste=1957 (0.85%)
+  Step Metrics (Dual-Size):
+    Total steps:           308
+    Output-producing steps:308
+    Avg step time:         2.60 ms
+    P50 step time:         2.32 ms
+    P95 step time:         9.05 ms
+    Max step time:         10.70 ms
+    Time to first output:  0.001 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=310, total=12642.17 ms, avg=40.78 ms, max=235.76 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=308, total=11836.60 ms, avg=38.43 ms, max=228.81 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 13.39s
+  Output tokens: 25600
+  Throughput: 1911.38 tok/s
+[rank0]:[W501 18:56:40.037102153 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         2425.87 tok/s
+Fixed-32         2481.27 tok/s
+Dual-Size        1911.38 tok/s
+Dual vs Fixed-16:  -21.2%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  4096
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 4352
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=8715) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=8715) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.16it/s]
+(EngineCore pid=8715) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.16it/s]
+(EngineCore pid=8715) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=4352.0 min=4352 max=4352
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 433376
+    Total actual tokens:    432550
+    Total tail waste:       826
+    Waste %%:                 0.19%
+    -- class=default, count=100, allocated=433376, actual=432550, waste=826 (0.19%)
+  Step Metrics (Fixed-16):
+    Total steps:           306
+    Output-producing steps:306
+    Avg step time:         2.96 ms
+    P50 step time:         2.27 ms
+    P95 step time:         9.63 ms
+    Max step time:         10.71 ms
+    Time to first output:  0.001 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=308, total=18242.77 ms, avg=59.23 ms, max=299.79 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=306, total=17609.89 ms, avg=57.55 ms, max=297.34 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 18.99s
+  Output tokens: 25600
+  Throughput: 1348.14 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=9014) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=9014) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.18it/s]
+(EngineCore pid=9014) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=9014) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=4352.0 min=4352 max=4352
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 433984
+    Total actual tokens:    432550
+    Total tail waste:       1434
+    Waste %%:                 0.33%
+    -- class=default, count=100, allocated=433984, actual=432550, waste=1434 (0.33%)
+  Step Metrics (Fixed-32):
+    Total steps:           306
+    Output-producing steps:306
+    Avg step time:         3.25 ms
+    P50 step time:         2.29 ms
+    P95 step time:         10.04 ms
+    Max step time:         10.86 ms
+    Time to first output:  0.001 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=308, total=18235.13 ms, avg=59.20 ms, max=299.58 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=306, total=17591.77 ms, avg=57.49 ms, max=296.93 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 19.01s
+  Output tokens: 25600
+  Throughput: 1346.47 tok/s
+[rank0]:[W501 18:58:03.654763262 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=9452) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=9452) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.30it/s]
+(EngineCore pid=9452) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.29it/s]
+(EngineCore pid=9452) 
+  Initial Admission Summary (Dual-Size):
+    -- class=large, count=100, block_size=32, expected_total avg=4352.0 min=4352 max=4352
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 238912
+    Total actual tokens:    237862
+    Total tail waste:       1050
+    Waste %%:                 0.44%
+    -- class=large, count=55, allocated=238912, actual=237862, waste=1050 (0.44%)
+  Step Metrics (Dual-Size):
+    Total steps:           538
+    Output-producing steps:538
+    Avg step time:         1.96 ms
+    P50 step time:         1.31 ms
+    P95 step time:         9.26 ms
+    Max step time:         10.72 ms
+    Time to first output:  0.001 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=540, total=25896.21 ms, avg=47.96 ms, max=257.91 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=538, total=24508.05 ms, avg=45.55 ms, max=248.93 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 26.79s
+  Output tokens: 25600
+  Throughput: 955.65 tok/s
+[rank0]:[W501 18:58:51.612722165 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         1348.14 tok/s
+Fixed-32         1346.47 tok/s
+Dual-Size        955.65 tok/s
+Dual vs Fixed-16:  -29.1%
+
+Results saved to sweep_results.json
+============================================================
+Dual-Size KV Cache Benchmark
+============================================================
+Model: Qwen/Qwen2.5-0.5B-Instruct
+Requests: 100
+Fixed input length:  8192
+Fixed output length: 256
+
+Generating fixed-length workload...
+  Requests: 100
+  Expected total tokens/request: 8448
+
+============================================================
+Benchmarking: Fixed-16
+============================================================
+(EngineCore pid=10117) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=10117) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  6.59it/s]
+(EngineCore pid=10117) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  6.58it/s]
+(EngineCore pid=10117) 
+  Initial Admission Summary (Fixed-16):
+    -- class=default, count=100, block_size=16, expected_total avg=8448.0 min=8448 max=8448
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-16 peak live):
+    Total allocated tokens: 463344
+    Total actual tokens:    462905
+    Total tail waste:       439
+    Waste %%:                 0.09%
+    -- class=default, count=55, allocated=463344, actual=462905, waste=439 (0.09%)
+  Step Metrics (Fixed-16):
+    Total steps:           560
+    Output-producing steps:560
+    Avg step time:         2.61 ms
+    P50 step time:         1.39 ms
+    P95 step time:         9.44 ms
+    Max step time:         10.86 ms
+    Time to first output:  0.003 s
+  Execution Timing (Fixed-16):
+    -- worker_execute_model: count=562, total=41720.77 ms, avg=74.24 ms, max=342.70 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=560, total=40660.56 ms, avg=72.61 ms, max=340.45 ms
+  Runtime Promotion Stats (Fixed-16):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 42.69s
+  Output tokens: 25600
+  Throughput: 599.63 tok/s
+
+============================================================
+Benchmarking: Fixed-32
+============================================================
+(EngineCore pid=10537) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=10537) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  6.55it/s]
+(EngineCore pid=10537) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  6.54it/s]
+(EngineCore pid=10537) 
+  Initial Admission Summary (Fixed-32):
+    -- class=default, count=100, block_size=32, expected_total avg=8448.0 min=8448 max=8448
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Fixed-32 peak live):
+    Total allocated tokens: 463712
+    Total actual tokens:    462897
+    Total tail waste:       815
+    Waste %%:                 0.18%
+    -- class=default, count=55, allocated=463712, actual=462897, waste=815 (0.18%)
+  Step Metrics (Fixed-32):
+    Total steps:           560
+    Output-producing steps:560
+    Avg step time:         2.36 ms
+    P50 step time:         1.18 ms
+    P95 step time:         9.01 ms
+    Max step time:         10.10 ms
+    Time to first output:  0.003 s
+  Execution Timing (Fixed-32):
+    -- worker_execute_model: count=562, total=41752.10 ms, avg=74.29 ms, max=342.43 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=560, total=40687.93 ms, avg=72.66 ms, max=340.26 ms
+  Runtime Promotion Stats (Fixed-32):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 42.73s
+  Output tokens: 25600
+  Throughput: 599.12 tok/s
+[rank0]:[W501 19:01:03.678659985 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+Benchmarking: Dual-Size
+============================================================
+(EngineCore pid=11101) Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=11101) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=11101) Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  5.17it/s]
+(EngineCore pid=11101) 
+  Initial Admission Summary (Dual-Size):
+    -- class=large, count=100, block_size=32, expected_total avg=8448.0 min=8448 max=8448
+Warming up...
+Running 100 requests...
+  KV Memory Stats (Dual-Size peak live):
+    Total allocated tokens: 228064
+    Total actual tokens:    227551
+    Total tail waste:       513
+    Waste %%:                 0.22%
+    -- class=large, count=27, allocated=228064, actual=227551, waste=513 (0.22%)
+  Step Metrics (Dual-Size):
+    Total steps:           1048
+    Output-producing steps:1048
+    Avg step time:         1.46 ms
+    P50 step time:         0.78 ms
+    P95 step time:         8.69 ms
+    Max step time:         12.74 ms
+    Time to first output:  0.003 s
+  Execution Timing (Dual-Size):
+    -- worker_execute_model: count=1050, total=52641.58 ms, avg=50.13 ms, max=294.91 ms
+    -- execute_model: count=0, total=0.00 ms, avg=0.00 ms, max=0.00 ms
+    -- _model_forward: count=1048, total=49936.48 ms, avg=47.65 ms, max=285.49 ms
+  Runtime Promotion Stats (Dual-Size):
+    Promotions:            0
+    Kernel blocks copied:  0
+    Tokens copied:         0
+Results:
+  Elapsed: 53.89s
+  Output tokens: 25239
+  Throughput: 468.33 tok/s
+[rank0]:[W501 19:02:18.279758046 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+============================================================
+SUMMARY
+============================================================
+Fixed-16         599.63 tok/s
+Fixed-32         599.12 tok/s
+Dual-Size        468.33 tok/s
+Dual vs Fixed-16:  -21.9%
+
+Results saved to sweep_results.json

@@ -152,6 +152,26 @@ class CacheConfig:
     'native' (vLLM native CPU offloading), 'lmcache'.
     KV offloading is only activated when kv_offloading_size is set."""
 
+    experimental_dual_kv_blocks: bool = False
+    """Enable the experimental dual-size per-request KV block mode."""
+
+    experimental_small_kv_block_size: int = Field(default=16, gt=0)
+    """Small KV block size used by the experimental dual-size mode."""
+
+    experimental_large_kv_block_size: int = Field(default=32, gt=0)
+    """Large KV block size used by the experimental dual-size mode."""
+
+    experimental_dual_kv_threshold_tokens: int = Field(default=256, gt=0)
+    """Assign requests at or below this expected total length to the small size."""
+
+    experimental_small_kv_pool_fraction: float = Field(default=0.5, gt=0, lt=1)
+    """Fraction of the KV cache byte budget reserved for the small-size pool."""
+
+    experimental_dual_kv_mixed_kernel: bool = False
+    """Enable the mixed-kernel path for dual-size KV blocks.
+    When enabled, uses a single kernel launch that supports mixed block sizes.
+    When disabled (default), uses the two-sub-batch fallback path."""
+
     def compute_hash(self) -> str:
         """
         WARNING: Whenever a new field is added to this config,
@@ -180,6 +200,12 @@ class CacheConfig:
             "num_cpu_blocks",
             # WIP feature toggle not impacting compiled graph shape
             "kv_sharing_fast_prefill",
+            "experimental_dual_kv_blocks",
+            "experimental_small_kv_block_size",
+            "experimental_large_kv_block_size",
+            "experimental_dual_kv_threshold_tokens",
+            "experimental_small_kv_pool_fraction",
+            "experimental_dual_kv_mixed_kernel",
         }
 
         from vllm.config.utils import get_hash_factors, hash_factors
@@ -231,3 +257,32 @@ class CacheConfig:
                 "scaling factor."
             )
         return cache_dtype
+
+    @model_validator(mode="after")
+    def _validate_experimental_dual_kv_blocks(self) -> "CacheConfig":
+        if not self.experimental_dual_kv_blocks:
+            # Mixed kernel mode requires dual_kv_blocks
+            if self.experimental_dual_kv_mixed_kernel:
+                raise ValueError(
+                    "experimental_dual_kv_mixed_kernel requires "
+                    "experimental_dual_kv_blocks to be enabled"
+                )
+            return self
+
+        if (
+            self.experimental_small_kv_block_size
+            == self.experimental_large_kv_block_size
+        ):
+            raise ValueError(
+                "experimental_small_kv_block_size and "
+                "experimental_large_kv_block_size must differ"
+            )
+        if (
+            self.experimental_small_kv_block_size
+            > self.experimental_large_kv_block_size
+        ):
+            raise ValueError(
+                "experimental_small_kv_block_size must be smaller than "
+                "experimental_large_kv_block_size"
+            )
+        return self

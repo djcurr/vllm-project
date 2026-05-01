@@ -113,6 +113,9 @@ class Scheduler(SchedulerInterface):
             self.kv_events_config is not None
             and self.kv_events_config.enable_kv_cache_events
         )
+        self.experimental_dual_kv_blocks = (
+            self.cache_config.experimental_dual_kv_blocks
+        )
 
         # Create KVConnector for the Scheduler. Note that each Worker
         # will have a corresponding KVConnector with Role=WORKER.
@@ -234,6 +237,33 @@ class Scheduler(SchedulerInterface):
             hash_block_size=self.block_size,
             metrics_collector=self.kv_metrics_collector,
         )
+        self.kv_cache_managers: dict[str, KVCacheManager] = {
+            "default": self.kv_cache_manager
+        }
+        self.active_kv_size_class = "default"
+        self._pending_promotion_frees: list[tuple[Request, str]] = []
+        if self.experimental_dual_kv_blocks:
+            aux_configs = kv_cache_config.aux_kv_cache_configs or {}
+            large_config = aux_configs.get("large")
+            if large_config is None:
+                raise ValueError(
+                    "experimental_dual_kv_blocks requires a large KV cache config"
+                )
+            self.kv_cache_managers = {
+                "small": self.kv_cache_manager,
+                "large": KVCacheManager(
+                    kv_cache_config=large_config,
+                    max_model_len=self.max_model_len,
+                    enable_caching=False,
+                    use_eagle=self.use_eagle,
+                    log_stats=self.log_stats,
+                    enable_kv_cache_events=self.enable_kv_cache_events,
+                    dcp_world_size=self.dcp_world_size,
+                    pcp_world_size=self.pcp_world_size,
+                    hash_block_size=large_config.kv_cache_groups[0].kv_cache_spec.block_size,
+                    metrics_collector=self.kv_metrics_collector,
+                ),
+            }
         # Bind GPU block pool to the KV connector. This must happen after
         # kv_cache_manager is constructed so block_pool is available.
         if self.connector is not None and hasattr(
@@ -294,6 +324,70 @@ class Scheduler(SchedulerInterface):
             )
 
         self._pause_state: PauseState = PauseState.UNPAUSED
+
+    def get_request_kv_size_class(self, request: Request) -> str:
+        if not self.experimental_dual_kv_blocks:
+            return "default"
+        return request.kv_size_class
+
+    def get_kv_cache_manager_for_request(self, request: Request) -> KVCacheManager:
+        return self.kv_cache_managers[self.get_request_kv_size_class(request)]
+
+    def get_active_kv_cache_manager(self) -> KVCacheManager:
+        return self.kv_cache_managers[self.active_kv_size_class]
+
+    def _get_effective_large_threshold(self) -> int:
+        if not self.experimental_dual_kv_blocks:
+            return self.cache_config.block_size
+        return max(
+            self.cache_config.experimental_dual_kv_threshold_tokens,
+            self.cache_config.experimental_large_kv_block_size * 32,
+        )
+
+    def _should_promote_request(self, request: Request) -> bool:
+        if not self.experimental_dual_kv_blocks:
+            return False
+        if request.kv_size_class != "small":
+            return False
+        if request.promotion_source_block_ids is not None:
+            return False
+        return request.num_computed_tokens >= self._get_effective_large_threshold()
+
+    def _free_pending_promotion_blocks(self) -> None:
+        if not self._pending_promotion_frees:
+            return
+        pending = self._pending_promotion_frees
+        self._pending_promotion_frees = []
+        for request, old_kv_size_class in pending:
+            self.kv_cache_managers[old_kv_size_class].free(request)
+
+    def _promote_request(self, request: Request, timestamp: float) -> None:
+        assert request.status == RequestStatus.RUNNING
+        assert request.kv_size_class == "small"
+        self.prev_step_scheduled_req_ids.discard(request.request_id)
+        old_block_ids = self.kv_cache_managers["small"].get_block_ids(
+            request.request_id
+        )
+        request.promotion_source_kv_size_class = "small"
+        request.promotion_source_block_ids = old_block_ids
+        request.kv_size_class = "large"
+        request.kv_block_size = self.cache_config.experimental_large_kv_block_size
+        request.status = RequestStatus.PREEMPTED
+        if request.spec_token_ids:
+            request.spec_token_ids = []
+        if self.log_stats:
+            request.record_event(EngineCoreEventType.PREEMPTED, timestamp)
+        self.waiting.prepend_request(request)
+
+    def _select_step_kv_size_class(self) -> str:
+        if not self.experimental_dual_kv_blocks:
+            return "default"
+        if self.running:
+            return self.get_request_kv_size_class(self.running[0])
+        for queue in (self.waiting, self.skipped_waiting):
+            if queue:
+                return self.get_request_kv_size_class(queue.peek_request())
+        return "small"
 
     def _mamba_block_aligned_split(
         self,
@@ -377,13 +471,23 @@ class Scheduler(SchedulerInterface):
 
         # For logging.
         scheduled_timestamp = time.monotonic()
+        self._free_pending_promotion_blocks()
 
-        self.kv_cache_manager.new_step_starts()
+        # With mixed kernel support, we no longer need to select a single
+        # KV size class per step. Both small and large requests can be
+        # scheduled together and handled by the mixed kernel.
+        for manager in self.kv_cache_managers.values():
+            manager.new_step_starts()
 
         # First, schedule the RUNNING requests.
         req_index = 0
         while req_index < len(self.running) and token_budget > 0:
             request = self.running[req_index]
+            if self._should_promote_request(request):
+                self.running.pop(req_index)
+                self._promote_request(request, scheduled_timestamp)
+                continue
+            request_kv_cache_manager = self.get_kv_cache_manager_for_request(request)
 
             if (
                 request.num_output_placeholders > 0
@@ -460,7 +564,7 @@ class Scheduler(SchedulerInterface):
             # Schedule newly needed KV blocks for the request.
             with record_function_or_nullcontext("schedule: allocate_slots"):
                 while True:
-                    new_blocks = self.kv_cache_manager.allocate_slots(
+                    new_blocks = request_kv_cache_manager.allocate_slots(
                         request,
                         num_new_tokens,
                         num_lookahead_tokens=self.num_lookahead_tokens,
@@ -573,6 +677,9 @@ class Scheduler(SchedulerInterface):
 
                 request = request_queue.peek_request()
                 request_id = request.request_id
+                request_kv_cache_manager = self.get_kv_cache_manager_for_request(
+                    request
+                )
 
                 # try to promote blocked statuses while traversing skipped queue.
                 if self._is_blocked_waiting_status(
@@ -610,7 +717,7 @@ class Scheduler(SchedulerInterface):
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
                     new_computed_blocks, num_new_local_computed_tokens = (
-                        self.kv_cache_manager.get_computed_blocks(request)
+                        request_kv_cache_manager.get_computed_blocks(request)
                     )
 
                     # Get externally-cached tokens if using a KVConnector.
@@ -645,7 +752,9 @@ class Scheduler(SchedulerInterface):
                 else:
                     # KVTransfer: WAITING reqs have num_computed_tokens > 0
                     # after async KV recvs are completed.
-                    new_computed_blocks = self.kv_cache_manager.empty_kv_cache_blocks
+                    new_computed_blocks = (
+                        request_kv_cache_manager.empty_kv_cache_blocks
+                    )
                     num_new_local_computed_tokens = 0
                     num_computed_tokens = request.num_computed_tokens
 
@@ -731,7 +840,7 @@ class Scheduler(SchedulerInterface):
 
                 if (
                     self.scheduler_reserve_full_isl
-                    and not self.kv_cache_manager.can_fit_full_sequence(
+                    and not request_kv_cache_manager.can_fit_full_sequence(
                         request,
                         num_new_computed_tokens=num_new_local_computed_tokens,
                         new_computed_blocks=new_computed_blocks,
@@ -743,7 +852,7 @@ class Scheduler(SchedulerInterface):
                         self.encoder_cache_manager.free(request)
                     break
 
-                new_blocks = self.kv_cache_manager.allocate_slots(
+                new_blocks = request_kv_cache_manager.allocate_slots(
                     request,
                     num_new_tokens,
                     num_new_computed_tokens=num_new_local_computed_tokens,
@@ -770,7 +879,7 @@ class Scheduler(SchedulerInterface):
                 if self.connector is not None:
                     self.connector.update_state_after_alloc(
                         request,
-                        self.kv_cache_manager.get_blocks(request_id),
+                        request_kv_cache_manager.get_blocks(request_id),
                         num_external_computed_tokens,
                     )
                     if (
@@ -819,7 +928,7 @@ class Scheduler(SchedulerInterface):
 
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
-                req_to_new_blocks[request_id] = self.kv_cache_manager.get_blocks(
+                req_to_new_blocks[request_id] = request_kv_cache_manager.get_blocks(
                     request_id
                 )
                 num_scheduled_tokens[request_id] = num_new_tokens
@@ -864,13 +973,16 @@ class Scheduler(SchedulerInterface):
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
+        # With mixed kernel support, we use a single common prefix value
+        # for all requests regardless of KV size class.
         num_common_prefix_blocks = [0] * len(self.kv_cache_config.kv_cache_groups)
-        with record_function_or_nullcontext("schedule: get_num_common_prefix_blocks"):
-            if self.running:
-                any_request_id = self.running[0].request_id
-                num_common_prefix_blocks = (
-                    self.kv_cache_manager.get_num_common_prefix_blocks(any_request_id)
-                )
+        if self.running:
+            any_request_id = self.running[0].request_id
+            kv_size_class = self.get_request_kv_size_class(self.running[0])
+            manager = self.kv_cache_managers[kv_size_class]
+            num_common_prefix_blocks = manager.get_num_common_prefix_blocks(
+                any_request_id
+            )
 
         # Construct the scheduler output.
         if self.use_v2_model_runner:
@@ -901,15 +1013,24 @@ class Scheduler(SchedulerInterface):
                 req_to_new_blocks,
             )
 
+        for req in scheduled_resumed_reqs:
+            if req.promotion_source_kv_size_class is not None:
+                self._pending_promotion_frees.append(
+                    (req, req.promotion_source_kv_size_class)
+                )
+                req.promotion_source_kv_size_class = None
+                req.promotion_source_block_ids = None
+
         # Record the request ids that were scheduled in this step.
         self.prev_step_scheduled_req_ids.clear()
         self.prev_step_scheduled_req_ids.update(num_scheduled_tokens.keys())
 
-        new_block_ids_to_zero = (
-            (self.kv_cache_manager.take_new_block_ids() or None)
-            if self.needs_kv_cache_zeroing
-            else None
-        )
+        # Collect new block IDs to zero from all KV cache managers.
+        new_block_ids_to_zero: list[int] = []
+        if self.needs_kv_cache_zeroing:
+            for manager in self.kv_cache_managers.values():
+                new_block_ids = manager.take_new_block_ids() or []
+                new_block_ids_to_zero.extend(new_block_ids)
 
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
@@ -926,7 +1047,7 @@ class Scheduler(SchedulerInterface):
             # the previous and the current steps.
             finished_req_ids=self.finished_req_ids,
             free_encoder_mm_hashes=self.encoder_cache_manager.get_freed_mm_hashes(),
-            new_block_ids_to_zero=new_block_ids_to_zero,
+            new_block_ids_to_zero=new_block_ids_to_zero or None,
         )
 
         # NOTE(Kuntai): this function is designed for multiple purposes:
@@ -962,7 +1083,7 @@ class Scheduler(SchedulerInterface):
         assert request.status == RequestStatus.RUNNING, (
             "Only running requests can be preempted"
         )
-        self.kv_cache_manager.free(request)
+        self.get_kv_cache_manager_for_request(request).free(request)
         self.encoder_cache_manager.free(request)
         request.status = RequestStatus.PREEMPTED
         request.num_computed_tokens = 0
@@ -1063,9 +1184,13 @@ class Scheduler(SchedulerInterface):
         req_ids: list[str] = []
         new_token_ids: list[list[int]] = []
         new_block_ids: list[tuple[list[int], ...] | None] = []
+        promotion_source_block_ids: list[tuple[list[int], ...] | None] = []
+        promotion_source_kv_size_classes: list[str | None] = []
         all_token_ids: dict[str, list[int]] = {}
         num_computed_tokens: list[int] = []
         num_output_tokens: list[int] = []
+        kv_size_classes: list[str] = []
+        kv_block_sizes: list[int | None] = []
         resumed_req_ids = set()
 
         num_running_reqs = len(running_reqs)
@@ -1097,10 +1222,16 @@ class Scheduler(SchedulerInterface):
             new_block_ids.append(
                 req_to_new_blocks[req_id].get_block_ids(allow_none=True)
             )
+            promotion_source_block_ids.append(req.promotion_source_block_ids)
+            promotion_source_kv_size_classes.append(
+                req.promotion_source_kv_size_class
+            )
             num_computed_tokens.append(req.num_computed_tokens)
             num_output_tokens.append(
                 req.num_output_tokens + req.num_output_placeholders
             )
+            kv_size_classes.append(self.get_request_kv_size_class(req))
+            kv_block_sizes.append(req.kv_block_size)
 
         return CachedRequestData(
             req_ids=req_ids,
@@ -1110,6 +1241,10 @@ class Scheduler(SchedulerInterface):
             new_block_ids=new_block_ids,
             num_computed_tokens=num_computed_tokens,
             num_output_tokens=num_output_tokens,
+            promotion_source_block_ids=promotion_source_block_ids,
+            promotion_source_kv_size_classes=promotion_source_kv_size_classes,
+            kv_size_classes=kv_size_classes,
+            kv_block_sizes=kv_block_sizes,
         )
 
     def _try_schedule_encoder_inputs(
@@ -1504,7 +1639,13 @@ class Scheduler(SchedulerInterface):
             self._update_from_kv_xfer_finished(kv_connector_output)
 
         # collect KV cache events from KV cache manager
-        events = self.kv_cache_manager.take_events()
+        events = []
+        for manager in self.kv_cache_managers.values():
+            manager_events = manager.take_events()
+            if manager_events:
+                events.extend(manager_events)
+        if not events:
+            events = None
 
         # collect KV cache events from connector
         if self.connector is not None:
@@ -1603,7 +1744,9 @@ class Scheduler(SchedulerInterface):
         if not self.vllm_config.model_config.enable_return_routed_experts:
             return None
 
-        kv_blocks = self.kv_cache_manager.get_blocks(request.request_id)
+        kv_blocks = self.get_kv_cache_manager_for_request(request).get_blocks(
+            request.request_id
+        )
         block_ids = kv_blocks.get_block_ids()[self.routed_experts_attn_gid]
         num_tokens = request.num_tokens - 1
 
@@ -1835,7 +1978,18 @@ class Scheduler(SchedulerInterface):
 
     def _free_blocks(self, request: Request):
         assert request.is_finished()
-        self.kv_cache_manager.free(request)
+        self._pending_promotion_frees = [
+            (pending_request, old_kv_size_class)
+            for pending_request, old_kv_size_class in self._pending_promotion_frees
+            if pending_request is not request
+        ]
+        self.get_kv_cache_manager_for_request(request).free(request)
+        if request.promotion_source_kv_size_class is not None:
+            self.kv_cache_managers[request.promotion_source_kv_size_class].free(
+                request
+            )
+            request.promotion_source_kv_size_class = None
+            request.promotion_source_block_ids = None
         del self.requests[request.request_id]
 
     @property
@@ -1892,7 +2046,10 @@ class Scheduler(SchedulerInterface):
             # persistent batch in the model runner.
             self.prev_step_scheduled_req_ids.clear()
 
-        reset_successful = self.kv_cache_manager.reset_prefix_cache()
+        reset_successful = all(
+            manager.reset_prefix_cache()
+            for manager in self.kv_cache_managers.values()
+        )
         if reset_running_requests and not reset_successful:
             raise RuntimeError(
                 "Failed to reset KV cache even when all the running requests are "
@@ -1937,7 +2094,7 @@ class Scheduler(SchedulerInterface):
     ) -> SchedulerStats | None:
         if not self.log_stats:
             return None
-        prefix_cache_stats = self.kv_cache_manager.make_prefix_cache_stats()
+        prefix_cache_stats = self.get_active_kv_cache_manager().make_prefix_cache_stats()
         assert prefix_cache_stats is not None
         connector_prefix_cache_stats: PrefixCacheStats | None = None
         if self.connector_prefix_cache_stats is not None:
@@ -1955,7 +2112,9 @@ class Scheduler(SchedulerInterface):
         return SchedulerStats(
             num_running_reqs=len(self.running),
             num_waiting_reqs=len(self.waiting) + len(self.skipped_waiting),
-            kv_cache_usage=self.kv_cache_manager.usage,
+            kv_cache_usage=max(
+                manager.usage for manager in self.kv_cache_managers.values()
+            ),
             encoder_cache_usage=self._get_encoder_cache_usage(),
             prefix_cache_stats=prefix_cache_stats,
             connector_prefix_cache_stats=connector_prefix_cache_stats,
@@ -2020,12 +2179,13 @@ class Scheduler(SchedulerInterface):
 
         # Free any out-of-window prefix blocks before we hand the block table to
         # the connector.
-        self.kv_cache_manager.remove_skipped_blocks(
+        manager = self.get_kv_cache_manager_for_request(request)
+        manager.remove_skipped_blocks(
             request_id=request.request_id,
             total_computed_tokens=request.num_tokens,
         )
 
-        block_ids = self.kv_cache_manager.get_block_ids(request.request_id)
+        block_ids = manager.get_block_ids(request.request_id)
 
         if not isinstance(self.connector, SupportsHMA):
             # NOTE(Kuntai): We should deprecate this code path after we enforce
@@ -2052,17 +2212,21 @@ class Scheduler(SchedulerInterface):
             # updated in _update_requests_with_invalid_blocks
             if request.num_computed_tokens:
                 # Cache any valid computed tokens.
-                self.kv_cache_manager.cache_blocks(request, request.num_computed_tokens)
+                self.get_kv_cache_manager_for_request(request).cache_blocks(
+                    request, request.num_computed_tokens
+                )
             else:
                 # No valid computed tokens, release allocated blocks.
                 # There may be a local cache hit on retry.
-                self.kv_cache_manager.free(request)
+                self.get_kv_cache_manager_for_request(request).free(request)
 
             self.failed_recving_kv_req_ids.remove(request.request_id)
         else:
             # Now that the blocks are ready, actually cache them.
             # This will cache the blocks iff caching is enabled.
-            self.kv_cache_manager.cache_blocks(request, request.num_computed_tokens)
+            self.get_kv_cache_manager_for_request(request).cache_blocks(
+                request, request.num_computed_tokens
+            )
 
             # on a full prompt hit, we need to re-compute the last token
             # in order to be able to sample the next token
@@ -2180,7 +2344,9 @@ class Scheduler(SchedulerInterface):
             marked_invalid_block = False
             req_id = request.request_id
             # TODO (davidb): add support for hybrid memory allocator
-            (req_block_ids,) = self.kv_cache_manager.get_block_ids(req_id)
+            (req_block_ids,) = self.get_kv_cache_manager_for_request(
+                request
+            ).get_block_ids(req_id)
             # We iterate only over blocks that may contain externally computed
             # tokens
             req_num_computed_tokens = (
@@ -2286,7 +2452,7 @@ class Scheduler(SchedulerInterface):
         # only when not using recompute policy (where blocks will be recomputed
         # and reused by other requests sharing them)
         if sync_blocks_to_evict and not self.recompute_kv_load_failures:
-            self.kv_cache_manager.evict_blocks(sync_blocks_to_evict)
+            self.get_active_kv_cache_manager().evict_blocks(sync_blocks_to_evict)
 
         if should_fail:
             all_failed_req_ids = async_failed_req_ids | sync_failed_req_ids

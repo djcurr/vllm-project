@@ -489,6 +489,15 @@ class KVCacheConfig:
     For models with multiple types of attention, there will be multiple groups,
     see `_get_kv_cache_config_uniform_page_size` for more details.
     """
+    aux_kv_cache_configs: dict[str, "KVCacheConfig"] | None = None
+    """
+    Optional auxiliary KV cache configs for experimental multi-pool setups.
+    The primary KVCacheConfig still represents the default/active pool.
+    """
+    kv_size_class: str = "default"
+    """
+    Logical size-class tag for experimental multi-pool setups.
+    """
 
     @property
     def has_mamba_layers(self) -> bool:
