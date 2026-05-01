@@ -60,6 +60,19 @@ def generate_workload(num_requests: int = 100, short_ratio: float = 0.7) -> List
     return workload
 
 
+def generate_fixed_workload(
+    num_requests: int,
+    input_len: int,
+    output_len: int,
+) -> List[Request]:
+    """Generate a fixed-length workload for sequence-length sweeps."""
+    prompt = " ".join(["word"] * input_len)
+    return [
+        Request(prompt=prompt, input_len=input_len, output_len=output_len)
+        for _ in range(num_requests)
+    ]
+
+
 def _dump_stacks(reason: str) -> None:
     print(f"\n[hang-dump] {reason}", file=sys.stderr, flush=True)
     faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
@@ -477,6 +490,14 @@ def main():
     parser.add_argument("--num-requests", type=int, default=100, help="Number of requests")
     parser.add_argument("--short-ratio", type=float, default=0.7,
                         help="Fraction of requests that are short (default: 0.7)")
+    parser.add_argument("--input-len", type=int, default=None,
+                        help="Use a fixed prompt length for every request")
+    parser.add_argument("--output-len", type=int, default=None,
+                        help="Use a fixed max output length for every request")
+    parser.add_argument("--results-file", default="benchmark_results.json",
+                        help="Path to write benchmark results JSON")
+    parser.add_argument("--append-results", action="store_true",
+                        help="Append results to --results-file instead of overwriting")
     parser.add_argument("--hang-timeout", type=float, default=0,
                         help="Seconds before dumping stacks and failing (0 disables)")
     parser.add_argument("--debug", action="store_true", help="(deprecated) verbose iteration logs are now controlled by VLLM_LOGGING_LEVEL")
@@ -491,16 +512,33 @@ def main():
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Requests: {num_requests}")
-    print(f"Short ratio: {short_ratio:.0%}")
 
     # Generate workload once
-    print(f"\nGenerating workload ({short_ratio:.0%} short)...")
-    workload = generate_workload(num_requests=num_requests, short_ratio=short_ratio)
-    
-    short_reqs = [r for r in workload if r.output_len <= 100]
-    long_reqs = [r for r in workload if r.output_len > 100]
-    print(f"  Short: {len(short_reqs)} ({len(short_reqs)/num_requests*100:.0f}%)")
-    print(f"  Long:  {len(long_reqs)} ({len(long_reqs)/num_requests*100:.0f}%)")
+    if (args.input_len is None) != (args.output_len is None):
+        parser.error("--input-len and --output-len must be provided together")
+
+    if args.input_len is not None:
+        if args.input_len <= 0 or args.output_len <= 0:
+            parser.error("--input-len and --output-len must be positive")
+        print(f"Fixed input length:  {args.input_len}")
+        print(f"Fixed output length: {args.output_len}")
+        print("\nGenerating fixed-length workload...")
+        workload = generate_fixed_workload(
+            num_requests=num_requests,
+            input_len=args.input_len,
+            output_len=args.output_len,
+        )
+        print(f"  Requests: {len(workload)}")
+        print(f"  Expected total tokens/request: {args.input_len + args.output_len}")
+    else:
+        print(f"Short ratio: {short_ratio:.0%}")
+        print(f"\nGenerating workload ({short_ratio:.0%} short)...")
+        workload = generate_workload(num_requests=num_requests, short_ratio=short_ratio)
+
+        short_reqs = [r for r in workload if r.output_len <= 100]
+        long_reqs = [r for r in workload if r.output_len > 100]
+        print(f"  Short: {len(short_reqs)} ({len(short_reqs)/num_requests*100:.0f}%)")
+        print(f"  Long:  {len(long_reqs)} ({len(long_reqs)/num_requests*100:.0f}%)")
     
     results = []
     hang_timeout_s = args.hang_timeout
@@ -571,10 +609,27 @@ def main():
             improvement = (dual_size['throughput_tokens_per_sec'] / fixed_16['throughput_tokens_per_sec'] - 1) * 100
             print(f"Dual vs Fixed-16:  {improvement:+.1f}%")
     
+    for result in results:
+        result["workload"] = {
+            "num_requests": num_requests,
+            "short_ratio": None if args.input_len is not None else short_ratio,
+            "input_len": args.input_len,
+            "output_len": args.output_len,
+        }
+
     # Save results
-    with open("benchmark_results.json", "w") as f:
+    if args.append_results and os.path.exists(args.results_file):
+        with open(args.results_file) as f:
+            existing_results = json.load(f)
+        if not isinstance(existing_results, list):
+            raise ValueError(
+                f"Cannot append to {args.results_file}: expected a JSON list"
+            )
+        results = existing_results + results
+
+    with open(args.results_file, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nResults saved to benchmark_results.json")
+    print(f"\nResults saved to {args.results_file}")
 
 
 if __name__ == "__main__":
